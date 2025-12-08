@@ -47,8 +47,10 @@ import argparse
 import signal
 import sys
 import time
+from collections import deque
 from typing import Optional
 
+import matplotlib.pyplot as plt
 import numpy as np
 from omegaconf import DictConfig
 
@@ -60,10 +62,11 @@ from capybarish.utils import load_cfg
 DEFAULT_CONFIG_NAME = "default"
 INITIAL_DATA_COLLECTION_CYCLES = 10
 CONTROL_LOOP_SLEEP_TIME = 0.02  # 50 Hz control loop
-SINUSOIDAL_AMPLITUDE = 0.2
+SINUSOIDAL_AMPLITUDE = 0.6
 SINUSOIDAL_FREQUENCY_DIVIDER = 3
 DEFAULT_KP_GAIN = 8.0
 DEFAULT_KD_GAIN = 0.2
+PLOT_HISTORY_LENGTH = 200  # Number of data points to display in plots
 
 # Keyboard command mappings
 KEY_ENABLE_MOTORS = "e"
@@ -72,6 +75,14 @@ KEY_DISABLE_MOTORS = "d"
 # Global variables for cleanup
 interface: Optional[Interface] = None
 kb: Optional[KBHit] = None
+
+# Global variables for plotting
+fig = None
+ax_action = None
+ax_dof = None
+action_history = None
+dof_history = None
+time_history = None
 
 
 def signal_handler(signum: int, frame) -> None:
@@ -87,29 +98,62 @@ def signal_handler(signum: int, frame) -> None:
 
 def cleanup_and_exit() -> None:
     """Perform cleanup operations and exit the program."""
-    global interface, kb
+    global interface, kb, fig
 
     try:
+        # Disable motors first
         if interface is not None:
             print("Disabling motors...")
             interface.switch_on = 0
             # Send a final command to ensure motors are disabled
-            if hasattr(interface, "send_action"):
-                zero_action = np.zeros(len(interface.cfg.interface.module_ids))
-                interface.send_action(zero_action)
-            print("Motors disabled.")
+            try:
+                if hasattr(interface, "send_action"):
+                    zero_action = np.zeros(len(interface.cfg.interface.module_ids))
+                    interface.send_action(zero_action)
+                print("Motors disabled.")
+            except Exception as e:
+                print(f"Warning: Could not send final motor command: {e}")
 
+        # Close plots before other cleanup to avoid matplotlib blocking
+        if fig is not None:
+            print("Closing plots...")
+            try:
+                plt.close('all')  # Close all figures
+                plt.ioff()  # Turn off interactive mode
+            except Exception as e:
+                print(f"Warning: Error closing plots: {e}")
+
+        # Cleanup keyboard handler
         if kb is not None:
             print("Cleaning up keyboard handler...")
-            # KBHit cleanup if it has a cleanup method
-            if hasattr(kb, "set_normal_term"):
-                kb.set_normal_term()
+            try:
+                if hasattr(kb, "set_normal_term"):
+                    kb.set_normal_term()
+            except Exception as e:
+                print(f"Warning: Error cleaning keyboard handler: {e}")
+
+        # Explicitly cleanup interface display (Rich Live)
+        if interface is not None:
+            print("Cleaning up interface display...")
+            try:
+                if hasattr(interface, "_cleanup_display"):
+                    interface._cleanup_display()
+            except Exception as e:
+                print(f"Warning: Error cleaning interface display: {e}")
 
     except Exception as e:
         print(f"Error during cleanup: {e}")
     finally:
         print("Cleanup complete. Exiting...")
-        sys.exit(0)
+        # Restore cursor explicitly as final safety measure
+        try:
+            sys.stdout.write('\033[?25h')
+            sys.stdout.flush()
+        except:
+            pass
+        # Force exit without calling sys.exit() to avoid deadlock
+        import os
+        os._exit(0)
 
 
 def initialize_system(cfg: DictConfig) -> Interface:
@@ -140,6 +184,94 @@ def initialize_system(cfg: DictConfig) -> Interface:
         raise RuntimeError(f"Failed to initialize system: {e}") from e
 
 
+def initialize_plots(num_modules: int) -> None:
+    """Initialize real-time plotting for action and position data.
+
+    Args:
+        num_modules: Number of robot modules to plot
+    """
+    global fig, ax_action, ax_dof, action_history, dof_history, time_history
+
+    # Enable interactive mode
+    plt.ion()
+
+    # Create figure with single subplot
+    fig, ax_action = plt.subplots(1, 1, figsize=(12, 6))
+    ax_dof = ax_action  # Use the same axis for both
+    fig.suptitle('Real-time Motor Control Data', fontsize=14, fontweight='bold')
+
+    # Initialize data buffers (deques for efficient append/pop operations)
+    action_history = [deque(maxlen=PLOT_HISTORY_LENGTH) for _ in range(num_modules)]
+    dof_history = [deque(maxlen=PLOT_HISTORY_LENGTH) for _ in range(num_modules)]
+    time_history = deque(maxlen=PLOT_HISTORY_LENGTH)
+
+    # Configure subplot
+    ax_action.set_xlabel('Time Step')
+    ax_action.set_ylabel('Value')
+    ax_action.set_title('Action Commands & Joint Positions')
+    ax_action.grid(True, alpha=0.3)
+
+    # Adjust layout to prevent overlap
+    plt.tight_layout()
+    plt.show(block=False)
+
+    print("Real-time plotting initialized!")
+
+
+def update_plots(time_step: int, action_array: np.ndarray, dof_pos: np.ndarray) -> None:
+    """Update real-time plots with new data.
+
+    Args:
+        time_step: Current time step
+        action_array: Array of action commands
+        dof_pos: Array of DOF positions
+    """
+    global fig, ax_action, ax_dof, action_history, dof_history, time_history
+
+    if fig is None or action_history is None:
+        return
+
+    # Add new data to history buffers
+    time_history.append(time_step)
+    for i in range(len(action_array)):
+        action_history[i].append(action_array[i])
+        dof_history[i].append(dof_pos[i])
+
+    # Clear previous plot
+    ax_action.clear()
+
+    # Reapply subplot settings
+    ax_action.set_xlabel('Time Step')
+    ax_action.set_ylabel('Value')
+    ax_action.set_title('Action Commands & Joint Positions')
+    ax_action.grid(True, alpha=0.3)
+
+    # Plot data for each module
+    time_array = list(time_history)
+    for i in range(len(action_array)):
+        action_data = list(action_history[i])
+        dof_data = list(dof_history[i])
+        
+        # Plot action with solid line
+        ax_action.plot(time_array, action_data, 
+                      label=f'Action {i}', 
+                      linewidth=2, 
+                      linestyle='-')
+        # Plot DOF position with dashed line
+        ax_action.plot(time_array, dof_data, 
+                      label=f'Position {i}', 
+                      linewidth=1.5, 
+                      linestyle='--',
+                      alpha=0.8)
+
+    # Add legend
+    ax_action.legend(loc='upper right', fontsize=8, ncol=2)
+
+    # Refresh the plot
+    plt.tight_layout()
+    plt.pause(0.001)  # Small pause to update the plot
+
+
 def run_control_loop(cfg: DictConfig) -> None:
     """Run the main control loop with sinusoidal commands and keyboard input.
 
@@ -163,6 +295,10 @@ def run_control_loop(cfg: DictConfig) -> None:
         interface = initialize_system(cfg)
         kb = KBHit()
 
+        # Initialize real-time plotting
+        num_modules = len(cfg.interface.module_ids)
+        initialize_plots(num_modules)
+
         # Setup signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
@@ -176,21 +312,34 @@ def run_control_loop(cfg: DictConfig) -> None:
 
         while True:
             try:
+                # Record start time of iteration
+                iteration_start_time = time.perf_counter()
+                
                 # Receive sensor data from all modules
                 interface.receive_module_data()
 
                 # Get observable data (for logging/monitoring)
                 observable_data = interface.get_observable_data()
 
+                # print(observable_data)
+                # import pdb; pdb.set_trace()
+                # observable_data.keys()
+                dof_pos = observable_data["dof_pos"]
+                print(f"Current DOF Positions: {dof_pos}")
+
                 # Generate sinusoidal control command
                 sinusoidal_command = SINUSOIDAL_AMPLITUDE * np.sin(
                     time_step / SINUSOIDAL_FREQUENCY_DIVIDER
                 )
+                # sinusoidal_command *= 0 
                 action_array = np.ones(num_modules) * sinusoidal_command
+
+                # Update real-time plots
+                update_plots(time_step, action_array, dof_pos)
 
                 # Send control commands to all modules
                 interface.send_action(
-                    action_array, kps=np.array([DEFAULT_KP_GAIN]), kds=np.array([DEFAULT_KD_GAIN])
+                    action_array, kps=np.array([DEFAULT_KP_GAIN]*num_modules), kds=np.array([DEFAULT_KD_GAIN]*num_modules)
                 )
 
                 # Handle keyboard input
@@ -198,14 +347,23 @@ def run_control_loop(cfg: DictConfig) -> None:
                     input_key = kb.getch()
                     handle_keyboard_input(input_key, interface)
 
-                # Control loop timing
-                time.sleep(CONTROL_LOOP_SLEEP_TIME)
+                # Control loop timing - sleep for remaining time to maintain target loop rate
+                iteration_elapsed_time = time.perf_counter() - iteration_start_time
+                sleep_time = max(0, CONTROL_LOOP_SLEEP_TIME - iteration_elapsed_time)
+                time.sleep(sleep_time)
+                
+                # Calculate actual loop time and frequency
+                actual_loop_time = time.perf_counter() - iteration_start_time
+                actual_frequency = 1.0 / actual_loop_time if actual_loop_time > 0 else 0.0
+                
                 time_step += 1
 
                 # Optional: Print status every N iterations
                 if time_step % 100 == 0:
                     status = "ENABLED" if interface.switch_on else "DISABLED"
-                    print(f"Step {time_step}: Motors {status}, Command: {sinusoidal_command:.3f}")
+                    target_frequency = 1.0 / CONTROL_LOOP_SLEEP_TIME
+                    print(f"Step {time_step}: Motors {status}, Command: {sinusoidal_command:.3f}, "
+                          f"Freq: {actual_frequency:.1f} Hz (target: {target_frequency:.1f} Hz)")
 
             except KeyboardInterrupt:
                 print("\\nKeyboard interrupt received...")

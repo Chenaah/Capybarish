@@ -266,7 +266,7 @@ class CommunicationManager:
         if module_id not in self.modules:
             # Get ping time if not cached
             if module_id not in self.cached_pings:
-                self.cached_pings[module_id] = get_ping_time(address[0])
+                # self.cached_pings[module_id] = get_ping_time(address[0])
                 cache_pings(self.cached_pings)
 
             # Create new module info
@@ -371,6 +371,8 @@ class CommunicationManager:
                 robot_data = RobotData.unpack(data, self.struct_format)
                 module_id = robot_data.module_id
                 data_dict = robot_data.get_data_dict()
+                # print(f"[DEBUG][CommunicationManager] Received data from module {module_id}")
+                # print(f"[DEBUG][CommunicationManager] Data: {data_dict}")
 
                 # Update module info
                 self._register_module(module_id, address)
@@ -408,6 +410,7 @@ class CommunicationManager:
                 print(f"[ERROR][CommunicationManager] Failed to process data from {address}: {e}")
                 self.stats["data_errors"] += 1
 
+        print(f"[DEBUG][CommunicationManager] Processed {messages_processed} messages in batch")
         # Check for buffer overflow
         if messages_processed >= max_messages:
             # Check if there are still more messages
