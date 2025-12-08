@@ -267,9 +267,10 @@ def update_plots(time_step: int, action_array: np.ndarray, dof_pos: np.ndarray) 
     # Add legend
     ax_action.legend(loc='upper right', fontsize=8, ncol=2)
 
-    # Refresh the plot
+    # Refresh the plot - use draw + flush_events instead of pause for better signal handling
     plt.tight_layout()
-    plt.pause(0.001)  # Small pause to update the plot
+    fig.canvas.draw_idle()
+    fig.canvas.flush_events()
 
 
 def run_control_loop(cfg: DictConfig) -> None:

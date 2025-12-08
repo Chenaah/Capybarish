@@ -84,7 +84,8 @@ Repository = "https://github.com/chenaah/capybarish.git"
 "Research Paper" = "https://arxiv.org/abs/2505.00784"
 
 [project.scripts]
-capybarish = "capybarish.interface:main"
+capybarish = "capybarish.cli:main"
+capybarish-gen = "capybarish.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "."}
@@ -100,6 +101,10 @@ capybarish = [
     "*.yaml",
     "*.yml",
     "*.json",
+]
+"*" = [
+    "arduino/**/*",
+    "schemas/*.cpy",
 ]
 
 # Black formatting

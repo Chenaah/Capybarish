@@ -27,10 +27,14 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-from .data_struct import RobotData, SentDataStruct
+from .data_struct import RobotData, SentDataStruct  # Legacy support
+from .generated import ReceivedData, SentData  # New generated message types
 from .utils import cache_pings, get_ping_time
+
+# Type alias for command data (supports both legacy and generated types)
+CommandData = Union[SentDataStruct, ReceivedData]
 
 
 class ConnectionStatus(Enum):
@@ -121,6 +125,12 @@ class UDPProtocol(CommunicationProtocol):
             return data, address
         except BlockingIOError:
             return None
+        except KeyboardInterrupt:
+            # Re-raise keyboard interrupt to allow proper signal handling
+            raise
+        except InterruptedError:
+            # System call was interrupted (e.g., by signal), re-raise as KeyboardInterrupt
+            raise KeyboardInterrupt("Interrupted by signal")
         except Exception as e:
             print(f"[ERROR] Failed to receive data: {e}")
             return None
@@ -234,30 +244,41 @@ class CommunicationManager:
         to_be_connected = copy.deepcopy(self.expected_modules)
 
         print(f"[CommunicationManager] Waiting for modules {list(to_be_connected)} to connect...")
+        print("[CommunicationManager] Press Ctrl+C to abort...")
 
         while to_be_connected:
-            data_result = self.protocol.receive_data(timeout=self.connection_timeout)
-
-            if data_result is None:
-                print(
-                    f"[ERROR][CommunicationManager] Timeout waiting for modules {list(to_be_connected)}"
-                )
-                continue
-
-            data, address = data_result
-
             try:
-                unpacked_data = struct.unpack(self.struct_format, data)
-                module_id = unpacked_data[0]
+                data_result = self.protocol.receive_data(timeout=self.connection_timeout)
 
-                if module_id in to_be_connected:
-                    self._register_module(module_id, address)
-                    to_be_connected.remove(module_id)
-                    print(f"[CommunicationManager] Module {module_id} connected from {address}")
+                if data_result is None:
+                    print(
+                        f"[ERROR][CommunicationManager] Timeout waiting for modules {list(to_be_connected)}"
+                    )
+                    continue
 
-            except Exception as e:
-                print(f"[ERROR][CommunicationManager] Failed to process initial connection: {e}")
-                self.stats["data_errors"] += 1
+                data, address = data_result
+
+                try:
+                    unpacked_data = struct.unpack(self.struct_format, data)
+                    module_id = unpacked_data[0]
+
+                    # Always print debug info for received data
+                    print(f"[DEBUG][CommunicationManager] Received data from module {module_id} at {address}")
+
+                    if module_id in to_be_connected:
+                        self._register_module(module_id, address)
+                        to_be_connected.remove(module_id)
+                        print(f"[CommunicationManager] Module {module_id} connected from {address}")
+                    else:
+                        print(f"[DEBUG][CommunicationManager] Module {module_id} is not in expected list {list(to_be_connected)}")
+
+                except Exception as e:
+                    print(f"[ERROR][CommunicationManager] Failed to process initial connection: {e}")
+                    self.stats["data_errors"] += 1
+
+            except KeyboardInterrupt:
+                print("\n[CommunicationManager] Connection wait interrupted by user (Ctrl+C)")
+                raise
 
     def _register_module(self, module_id: int, address: Tuple[str, int]) -> None:
         """Register a new module or update existing one."""
@@ -289,13 +310,13 @@ class CommunicationManager:
             module_info.last_seen = current_time
             module_info.pending_count = 0
 
-    def send_command(self, module_id: int, command_data: SentDataStruct) -> bool:
+    def send_command(self, module_id: int, command_data) -> bool:
         """
         Send command to a specific module.
 
         Args:
             module_id: Target module ID
-            command_data: Command data to send
+            command_data: Command data to send (SentDataStruct or generated ReceivedData)
 
         Returns:
             True if sent successfully, False otherwise
@@ -305,7 +326,13 @@ class CommunicationManager:
             return False
 
         module_info = self.modules[module_id]
-        serialized_data = command_data.serialize()
+        
+        # Support both old and new message types
+        if hasattr(command_data, 'serialize'):
+            serialized_data = command_data.serialize()
+        else:
+            # Legacy support - assume it's the old SentDataStruct
+            serialized_data = command_data.serialize()
 
         success = self.protocol.send_data(serialized_data, module_info.address)
 
@@ -371,7 +398,7 @@ class CommunicationManager:
                 robot_data = RobotData.unpack(data, self.struct_format)
                 module_id = robot_data.module_id
                 data_dict = robot_data.get_data_dict()
-                # print(f"[DEBUG][CommunicationManager] Received data from module {module_id}")
+                print(f"[DEBUG][CommunicationManager] Received data from module {module_id}")
                 # print(f"[DEBUG][CommunicationManager] Data: {data_dict}")
 
                 # Update module info

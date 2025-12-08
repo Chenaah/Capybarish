@@ -12,6 +12,15 @@ recursive-include examples *.py
 # Include plugin files
 recursive-include plugins *.py
 
+# Include Arduino/ESP32 library
+recursive-include arduino *.h *.hpp *.c *.cpp *.ino
+include arduino/library.json
+include arduino/library.properties
+include arduino/README.md
+
+# Include schema files
+recursive-include schemas *.cpy
+
 # Include package data
 recursive-include capybarish *.yaml *.yml *.json *.txt
 

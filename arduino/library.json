@@ -1,0 +1,40 @@
+{
+  "name": "Capybarish",
+  "version": "0.1.0",
+  "description": "Lightweight communication middleware for ESP32 robots - UDP-based real-time communication for modular robotics",
+  "keywords": [
+    "communication",
+    "udp",
+    "robotics",
+    "esp32",
+    "middleware",
+    "real-time",
+    "modular-robots"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chenaah/capybarish.git"
+  },
+  "authors": [
+    {
+      "name": "Chen Yu",
+      "email": "chenyu@u.northwestern.edu",
+      "url": "https://github.com/chenaah"
+    }
+  ],
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/chenaah/capybarish",
+  "frameworks": ["arduino", "espidf"],
+  "platforms": ["espressif32"],
+  "build": {
+    "libCompatMode": "soft"
+  },
+  "export": {
+    "include": [
+      "src/*",
+      "examples/*",
+      "LICENSE",
+      "README.md"
+    ]
+  }
+}

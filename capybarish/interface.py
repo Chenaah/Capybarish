@@ -36,13 +36,23 @@ from rich.table import Table
 
 from .communication import CommunicationManager, ConnectionStatus, UDPProtocol
 from .dashboard_server import DashboardServer
-from .data_struct import SentDataStruct
+from .data_struct import SentDataStruct  # Legacy support
 from .interpreter import interpret_motor_error, interpret_motor_mode
 from .kbhit import KBHit
 from .natnet.NatNetClient import NatNetClient
 from .plugin_system import PluginManager, PluginType
 from .service_registry import RobotModuleHealthChecker, ServiceRegistry, ServiceType
 from .utils import convert_np_arrays_to_lists, load_cached_pings
+
+# Try to import generated message types, fall back to legacy if not available
+try:
+    from .generated import ReceivedData  # New generated message type
+    USE_GENERATED_MESSAGES = True
+except ImportError:
+    ReceivedData = None
+    USE_GENERATED_MESSAGES = False
+    raise ImportError("Generated message types not found")
+
 
 # Constants
 DEFAULT_PORT = 6666
@@ -890,7 +900,7 @@ class Interface:
         """Send message using modern communication manager.
 
         Args:
-            data: Command data to send
+            data: Command data to send (list of values)
             address: Target address (host, port)
         """
         # Extract module_id from address
@@ -905,8 +915,24 @@ class Interface:
             return
 
         try:
-            # Create and send command
-            command_data = SentDataStruct(*data)
+            # Create command using generated message type if available
+            if USE_GENERATED_MESSAGES:
+                # Data format: [target_pos, target_vel, kp, kd, enable_filter, switch, calibrate, restart, timestamp]
+                command_data = ReceivedData(
+                    target=data[0],
+                    target_vel=data[1],
+                    kp=data[2],
+                    kd=data[3],
+                    enable_filter=data[4],
+                    switch_=data[5],
+                    calibrate=data[6],
+                    restart=data[7],
+                    timestamp=data[8]
+                )
+            else:
+                # Fallback to old SentDataStruct
+                command_data = SentDataStruct(*data)
+            
             success = self.comm_manager.send_command(module_id, command_data)
 
             if not success:

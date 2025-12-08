@@ -42,6 +42,9 @@ from .data_struct import RobotData, RobotDataLite, SentDataStruct
 from .interface import Interface
 from .utils import load_cfg
 
+# Code generation module
+from . import codegen
+
 __all__ = [
     "Interface",
     "DashboardServer",
@@ -49,5 +52,6 @@ __all__ = [
     "SentDataStruct",
     "RobotData",
     "RobotDataLite",
+    "codegen",
     "__version__",
 ]

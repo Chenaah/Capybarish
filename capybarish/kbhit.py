@@ -33,7 +33,8 @@ class KBHit:
             self.old_term = termios.tcgetattr(self.fd)
 
             # New terminal setting unbuffered
-            self.new_term[3] = self.new_term[3] & ~termios.ICANON & ~termios.ECHO
+            # Disable ICANON (canonical mode) and ECHO, but keep ISIG to allow Ctrl+C signals
+            self.new_term[3] = (self.new_term[3] & ~termios.ICANON & ~termios.ECHO) | termios.ISIG
             termios.tcsetattr(self.fd, termios.TCSAFLUSH, self.new_term)
 
             # Support normal-terminal reset at exit
