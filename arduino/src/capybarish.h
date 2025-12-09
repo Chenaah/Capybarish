@@ -5,6 +5,11 @@
  * This library provides UDP-based real-time communication for modular robotics,
  * with support for custom message types and automatic serialization.
  * 
+ * Features:
+ * - Template-based UDP communication (UDPComm)
+ * - ROS2-like pub/sub API (Node, Publisher, Subscription, Timer)
+ * - Code generation for message types (capybarish-gen)
+ * 
  * @author Chen Yu <chenyu@u.northwestern.edu>
  * @copyright 2025 Chen Yu
  * @license Apache-2.0
@@ -28,6 +33,9 @@
 
 #include <WiFiUdp.h>
 #include <cstring>
+
+// Include pub/sub module
+#include "capybarish_pubsub.h"
 
 namespace Capybarish {
 

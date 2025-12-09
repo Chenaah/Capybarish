@@ -45,7 +45,46 @@ from .utils import load_cfg
 # Code generation module
 from . import codegen
 
+# Pub/Sub system (ROS2-like API)
+from .pubsub import (
+    # Core classes
+    Node,
+    Publisher,
+    Subscription,
+    Timer,
+    Topic,
+    TopicManager,
+    # QoS
+    QoSProfile,
+    QoSReliabilityPolicy,
+    QoSHistoryPolicy,
+    QoSDurabilityPolicy,
+    # Executors
+    SingleThreadedExecutor,
+    MultiThreadedExecutor,
+    # Rate control
+    Rate,
+    # Global functions (ROS2-like)
+    init,
+    shutdown,
+    ok,
+    spin,
+    spin_once,
+    spin_until_future_complete,
+    get_topic_names_and_types,
+    get_node_names,
+    # Pre-defined QoS profiles
+    qos_profile_sensor_data,
+    qos_profile_default,
+    qos_profile_services,
+    qos_profile_parameters,
+    # Logging
+    NodeLogger,
+    LogLevel,
+)
+
 __all__ = [
+    # Legacy API
     "Interface",
     "DashboardServer",
     "load_cfg",
@@ -53,5 +92,33 @@ __all__ = [
     "RobotData",
     "RobotDataLite",
     "codegen",
+    # Pub/Sub API (ROS2-like)
+    "Node",
+    "Publisher",
+    "Subscription",
+    "Timer",
+    "Topic",
+    "TopicManager",
+    "QoSProfile",
+    "QoSReliabilityPolicy",
+    "QoSHistoryPolicy",
+    "QoSDurabilityPolicy",
+    "SingleThreadedExecutor",
+    "MultiThreadedExecutor",
+    "Rate",
+    "init",
+    "shutdown",
+    "ok",
+    "spin",
+    "spin_once",
+    "spin_until_future_complete",
+    "get_topic_names_and_types",
+    "get_node_names",
+    "qos_profile_sensor_data",
+    "qos_profile_default",
+    "qos_profile_services",
+    "qos_profile_parameters",
+    "NodeLogger",
+    "LogLevel",
     "__version__",
 ]
