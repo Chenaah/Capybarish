@@ -1151,3 +1151,219 @@ qos_profile_sensor_data = QoSProfile.sensor_data()
 qos_profile_default = QoSProfile.default()
 qos_profile_services = QoSProfile.services()
 qos_profile_parameters = QoSProfile.parameters()
+
+
+# =============================================================================
+# Network Server (Reply-to-Sender Pattern)
+# =============================================================================
+
+@dataclass
+class RemoteDevice:
+    """Information about a discovered remote device."""
+    address: str
+    port: int
+    last_seen: float
+    recv_count: int = 0
+    send_count: int = 0
+    last_message: Optional[Any] = None
+
+
+class NetworkServer(Generic[MsgT]):
+    """Server that auto-discovers clients and replies to senders.
+    
+    This implements the pattern where:
+    - Server doesn't need to know client IPs
+    - Clients send to server's known IP
+    - Server replies back to each client's address
+    
+    Perfect for ESP32 -> PC communication where ESP32 knows PC's IP,
+    but PC auto-discovers ESP32s.
+    
+    Example:
+        ```python
+        from capybarish.pubsub import NetworkServer
+        from capybarish.generated import ReceivedData, SentData
+        
+        def on_feedback(msg: SentData, addr: str):
+            print(f"Feedback from {addr}: pos={msg.motor.pos}")
+        
+        server = NetworkServer(
+            recv_type=SentData,
+            send_type=ReceivedData,
+            recv_port=6666,
+            send_port=6667,
+            callback=on_feedback,
+        )
+        
+        # Send to all discovered clients
+        cmd = ReceivedData(target=1.0, kp=10.0)
+        server.send_to_all(cmd)
+        
+        # Or send to specific client
+        server.send_to("192.168.1.100", cmd)
+        
+        # Spin in main loop
+        while True:
+            server.spin_once()
+        ```
+    """
+    
+    def __init__(
+        self,
+        recv_type: Type[MsgT],
+        send_type: Type,
+        recv_port: int,
+        send_port: int,
+        callback: Optional[Callable[[MsgT, str], None]] = None,
+        timeout_sec: float = 2.0,
+    ):
+        """Create a network server.
+        
+        Args:
+            recv_type: Message type to receive
+            send_type: Message type to send
+            recv_port: Port to listen on for incoming messages
+            send_port: Port to send replies to
+            callback: Callback(msg, sender_ip) when message received
+            timeout_sec: Time after which a client is considered inactive
+        """
+        self._recv_type = recv_type
+        self._send_type = send_type
+        self._recv_port = recv_port
+        self._send_port = send_port
+        self._callback = callback
+        self._timeout_sec = timeout_sec
+        
+        # Socket for receiving and sending
+        self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._socket.bind(("0.0.0.0", recv_port))
+        self._socket.setblocking(False)
+        
+        # Discovered devices
+        self._devices: Dict[str, RemoteDevice] = {}
+        self._devices_lock = threading.Lock()
+        
+        # Statistics
+        self._total_recv = 0
+        self._total_send = 0
+    
+    @property
+    def devices(self) -> Dict[str, RemoteDevice]:
+        """Get all discovered devices."""
+        with self._devices_lock:
+            return dict(self._devices)
+    
+    @property
+    def active_devices(self) -> Dict[str, RemoteDevice]:
+        """Get only active devices (seen within timeout)."""
+        now = time.time()
+        with self._devices_lock:
+            return {
+                addr: dev for addr, dev in self._devices.items()
+                if now - dev.last_seen < self._timeout_sec
+            }
+    
+    def spin_once(self) -> int:
+        """Process all pending incoming messages.
+        
+        Returns:
+            Number of messages processed
+        """
+        count = 0
+        while True:
+            try:
+                data, addr = self._socket.recvfrom(4096)
+                sender_ip = addr[0]
+                
+                # Check message size
+                if hasattr(self._recv_type, '_SIZE'):
+                    if len(data) < self._recv_type._SIZE:
+                        continue
+                
+                # Deserialize
+                if hasattr(self._recv_type, 'deserialize'):
+                    msg = self._recv_type.deserialize(data)
+                else:
+                    continue
+                
+                # Update device info
+                now = time.time()
+                with self._devices_lock:
+                    if sender_ip not in self._devices:
+                        self._devices[sender_ip] = RemoteDevice(
+                            address=sender_ip,
+                            port=addr[1],
+                            last_seen=now,
+                        )
+                    dev = self._devices[sender_ip]
+                    dev.last_seen = now
+                    dev.recv_count += 1
+                    dev.last_message = msg
+                
+                self._total_recv += 1
+                count += 1
+                
+                # Call user callback
+                if self._callback:
+                    self._callback(msg, sender_ip)
+                    
+            except BlockingIOError:
+                break  # No more data
+            except Exception:
+                continue
+        
+        return count
+    
+    def send_to(self, address: str, msg) -> bool:
+        """Send a message to a specific device.
+        
+        Args:
+            address: IP address of the device
+            msg: Message to send (must have serialize() method)
+            
+        Returns:
+            True if sent successfully
+        """
+        try:
+            if hasattr(msg, 'serialize'):
+                data = msg.serialize()
+                self._socket.sendto(data, (address, self._send_port))
+                
+                with self._devices_lock:
+                    if address in self._devices:
+                        self._devices[address].send_count += 1
+                
+                self._total_send += 1
+                return True
+        except Exception:
+            pass
+        return False
+    
+    def send_to_all(self, msg, active_only: bool = True) -> int:
+        """Send a message to all discovered devices.
+        
+        Args:
+            msg: Message to send
+            active_only: Only send to active devices (default True)
+            
+        Returns:
+            Number of devices sent to
+        """
+        devices = self.active_devices if active_only else self.devices
+        count = 0
+        for addr in devices:
+            if self.send_to(addr, msg):
+                count += 1
+        return count
+    
+    def close(self) -> None:
+        """Close the server socket."""
+        self._socket.close()
+    
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, *args):
+        self.close()
+
