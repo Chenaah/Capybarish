@@ -42,6 +42,17 @@ from .data_struct import RobotData, RobotDataLite, SentDataStruct
 from .interface import Interface
 from .utils import load_cfg
 
+# Modular dashboard components
+from .dashboard import (
+    RichDashboard,
+    MotorDashboard,
+    DashboardConfig,
+    DeviceInfo,
+    DeviceStatus,
+    ColumnConfig,
+    create_dashboard,
+)
+
 # Code generation module
 from . import codegen
 
@@ -54,6 +65,9 @@ from .pubsub import (
     Timer,
     Topic,
     TopicManager,
+    # Network Server (for ESP32 communication)
+    NetworkServer,
+    RemoteDevice,
     # QoS
     QoSProfile,
     QoSReliabilityPolicy,
@@ -92,6 +106,14 @@ __all__ = [
     "RobotData",
     "RobotDataLite",
     "codegen",
+    # Modular Dashboard
+    "RichDashboard",
+    "MotorDashboard",
+    "DashboardConfig",
+    "DeviceInfo",
+    "DeviceStatus",
+    "ColumnConfig",
+    "create_dashboard",
     # Pub/Sub API (ROS2-like)
     "Node",
     "Publisher",
@@ -99,6 +121,8 @@ __all__ = [
     "Timer",
     "Topic",
     "TopicManager",
+    "NetworkServer",
+    "RemoteDevice",
     "QoSProfile",
     "QoSReliabilityPolicy",
     "QoSHistoryPolicy",
