@@ -30,11 +30,11 @@ from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from .data_struct import RobotData, SentDataStruct  # Legacy support
-from .generated import ReceivedData, SentData  # New generated message types
+from .generated import MotorCommand, SensorData  # New generated message types
 from .utils import cache_pings, get_ping_time
 
 # Type alias for command data (supports both legacy and generated types)
-CommandData = Union[SentDataStruct, ReceivedData]
+CommandData = Union[SentDataStruct, MotorCommand]
 
 
 class ConnectionStatus(Enum):
@@ -316,7 +316,7 @@ class CommunicationManager:
 
         Args:
             module_id: Target module ID
-            command_data: Command data to send (SentDataStruct or generated ReceivedData)
+            command_data: Command data to send (SentDataStruct or generated MotorCommand)
 
         Returns:
             True if sent successfully, False otherwise

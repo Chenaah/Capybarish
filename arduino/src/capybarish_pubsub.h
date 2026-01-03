@@ -184,12 +184,12 @@ private:
  * @example
  * @code
  * // Unicast mode (specific IP)
- * auto pub = node.createPublisher<ReceivedData>("/motor/command", serverIP, 6666);
+ * auto pub = node.createPublisher<MotorCommand>("/motor/command", serverIP, 6666);
  * 
  * // Broadcast mode (auto-discovery)
- * auto pub = node.createBroadcastPublisher<ReceivedData>("/motor/command", 6666);
+ * auto pub = node.createBroadcastPublisher<MotorCommand>("/motor/command", 6666);
  * 
- * ReceivedData msg = {1.5f, 0.0f, 10.0f, 0.5f};
+ * MotorCommand msg = {1.5f, 0.0f, 10.0f, 0.5f};
  * pub->publish(msg);
  * @endcode
  */
@@ -308,11 +308,11 @@ using SubscriptionCallback = std::function<void(const T&)>;
  * 
  * @example
  * @code
- * void onCommand(const ReceivedData& msg) {
+ * void onCommand(const MotorCommand& msg) {
  *     Serial.printf("Target: %.2f\n", msg.target);
  * }
  * 
- * auto sub = node.createSubscription<ReceivedData>("/motor/command", onCommand, 6666);
+ * auto sub = node.createSubscription<MotorCommand>("/motor/command", onCommand, 6666);
  * @endcode
  */
 template<typename T>
@@ -622,8 +622,8 @@ constexpr size_t MAX_TIMERS = 8;
  * node.initWiFi("SSID", "password");
  * 
  * // Create publisher and subscriber
- * auto* cmdSub = node.createSubscription<ReceivedData>("/motor/cmd", onCommand, 6666);
- * auto* fbPub = node.createPublisher<SentData>("/motor/feedback", serverIP, 6667);
+ * auto* cmdSub = node.createSubscription<MotorCommand>("/motor/cmd", onCommand, 6666);
+ * auto* fbPub = node.createPublisher<SensorData>("/motor/feedback", serverIP, 6667);
  * 
  * // Create 100Hz timer
  * node.createTimer(0.01, controlLoop);

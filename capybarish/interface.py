@@ -46,10 +46,10 @@ from .utils import convert_np_arrays_to_lists, load_cached_pings
 
 # Try to import generated message types, fall back to legacy if not available
 try:
-    from .generated import ReceivedData  # New generated message type
+    from .generated import MotorCommand  # New generated message type
     USE_GENERATED_MESSAGES = True
 except ImportError:
-    ReceivedData = None
+    MotorCommand = None
     USE_GENERATED_MESSAGES = False
     raise ImportError("Generated message types not found")
 
@@ -918,7 +918,7 @@ class Interface:
             # Create command using generated message type if available
             if USE_GENERATED_MESSAGES:
                 # Data format: [target_pos, target_vel, kp, kd, enable_filter, switch, calibrate, restart, timestamp]
-                command_data = ReceivedData(
+                command_data = MotorCommand(
                     target=data[0],
                     target_vel=data[1],
                     kp=data[2],

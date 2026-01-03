@@ -32,7 +32,7 @@ using namespace motor_control;
 
 void printStats();
 void controlLoop();
-void onCommandReceived(const ReceivedData& cmd);
+void onCommandReceived(const MotorCommand& cmd);
 
 // =============================================================================
 // Configuration
@@ -58,13 +58,13 @@ const float CONTROL_RATE_HZ = 100.0f;
 cpy::Node node("motor_module");
 
 // Publishers and Subscribers (will be initialized in setup)
-cpy::Publisher<SentData>* feedbackPub = nullptr;
-cpy::Subscription<ReceivedData>* commandSub = nullptr;
+cpy::Publisher<SensorData>* feedbackPub = nullptr;
+cpy::Subscription<MotorCommand>* commandSub = nullptr;
 
 // State
 MotorData motorState = {};
 IMUData imuState = {};
-ReceivedData lastCommand = {};
+MotorCommand lastCommand = {};
 bool hasNewCommand = false;
 
 // Statistics
@@ -78,7 +78,7 @@ uint64_t lastStatsPrint = 0;
 /**
  * @brief Callback when command is received from server
  */
-void onCommandReceived(const ReceivedData& cmd) {
+void onCommandReceived(const MotorCommand& cmd) {
     lastCommand = cmd;
     hasNewCommand = true;
     
@@ -111,7 +111,7 @@ void controlLoop() {
     imuState.orientation.z = 0.0f;
     
     // Build feedback message
-    SentData feedback = {};
+    SensorData feedback = {};
     feedback.motor = motorState;
     feedback.imu = imuState;
     feedback.timestamp = micros() / 1000000.0f;  // Convert to seconds
@@ -143,16 +143,16 @@ void setup() {
     }
     
     // Create publisher for motor feedback
-    // Similar to Python: pub = node.create_publisher(SentData, '/motor/feedback', ...)
-    feedbackPub = node.createPublisher<SentData>(
+    // Similar to Python: pub = node.create_publisher(SensorData, '/motor/feedback', ...)
+    feedbackPub = node.createPublisher<SensorData>(
         "/motor/feedback",  // Topic name
         SERVER_IP,          // Remote IP
         SERVER_PORT         // Remote port
     );
     
     // Create subscription for commands
-    // Similar to Python: sub = node.create_subscription(ReceivedData, '/motor/command', callback, ...)
-    commandSub = node.createSubscription<ReceivedData>(
+    // Similar to Python: sub = node.create_subscription(MotorCommand, '/motor/command', callback, ...)
+    commandSub = node.createSubscription<MotorCommand>(
         "/motor/command",   // Topic name
         onCommandReceived,  // Callback function
         LOCAL_PORT          // Local port to listen on

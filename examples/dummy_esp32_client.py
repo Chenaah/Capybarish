@@ -4,8 +4,8 @@ Dummy ESP32 Client for Testing.
 
 This script simulates an ESP32 motor controller client that communicates
 with the server (basic_usage_pubsub.py). Each client instance:
-- Sends SentData (motor feedback) to the server
-- Receives ReceivedData (motor commands) from the server
+- Sends SensorData (motor feedback) to the server
+- Receives MotorCommand (motor commands) from the server
 - Simulates motor dynamics (position tracking toward target)
 
 To run multiple clients on the same machine, each client uses a unique
@@ -53,8 +53,8 @@ import numpy as np
 
 # Import capybarish message types
 from capybarish.generated import (
-    ReceivedData,
-    SentData,
+    MotorCommand,
+    SensorData,
     MotorData,
     IMUData,
     ErrorData,
@@ -242,11 +242,11 @@ class DummyESP32Client:
                 data, addr = self._recv_socket.recvfrom(1024)
                 
                 # Check size
-                if len(data) < ReceivedData._SIZE:
+                if len(data) < MotorCommand._SIZE:
                     continue
                 
                 # Deserialize command
-                cmd = ReceivedData.deserialize(data)
+                cmd = MotorCommand.deserialize(data)
                 
                 # Update motor state from command
                 with self._lock:
@@ -297,8 +297,8 @@ class DummyESP32Client:
         imu_data = IMUData()  # Default zeros
         error_data = ErrorData(reset_reason0=0, reset_reason1=0)
         
-        # Create SentData message
-        msg = SentData(
+        # Create SensorData message
+        msg = SensorData(
             module_id=self.module_id,
             receive_dt=int(dt * 1e6),  # microseconds
             timestamp=int((now - self._start_time) * 1e6),  # microseconds
@@ -308,6 +308,7 @@ class DummyESP32Client:
             motor=motor_data,
             imu=imu_data,
             error=error_data,
+            goal_distance=0.233,  # Simulated goal distance
         )
         
         # Send to server

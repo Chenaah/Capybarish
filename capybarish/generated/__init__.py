@@ -5,24 +5,25 @@ This module re-exports generated message types from schema definitions.
 The message types are binary-compatible with the ESP32/Arduino counterparts.
 
 Usage:
-    from capybarish.generated import ReceivedData, SentData
+    from capybarish.generated import MotorCommand, SensorData
     
     # Create command to send to ESP32
-    cmd = ReceivedData()
+    cmd = MotorCommand()
     cmd.target = 1.5
     cmd.kp = 10.0
     data = cmd.serialize()
     
     # Parse response from ESP32
-    response = SentData.deserialize(received_bytes)
+    response = SensorData.deserialize(received_bytes)
     print(response.motor.pos)
+    print(response.goal_distance)  # New field for distance info
 
 Copyright 2025 Chen Yu <chenyu@u.northwestern.edu>
 """
 
 from .motor_control_messages import (
-    ReceivedData,
-    SentData,
+    MotorCommand,
+    SensorData,
     MotorData,
     IMUData,
     IMUOrientation,
@@ -35,8 +36,8 @@ from .motor_control_messages import (
 )
 
 __all__ = [
-    "ReceivedData",
-    "SentData",
+    "MotorCommand",
+    "SensorData",
     "MotorData",
     "IMUData",
     "IMUOrientation",

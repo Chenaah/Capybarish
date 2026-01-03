@@ -47,7 +47,7 @@ import numpy as np
 # Import capybarish components
 import capybarish as cpy
 from capybarish.pubsub import NetworkServer, Rate
-from capybarish.generated import ReceivedData, SentData
+from capybarish.generated import MotorCommand, SensorData
 from capybarish.dashboard import MotorDashboard, DashboardConfig
 from capybarish.kbhit import KBHit
 
@@ -120,11 +120,11 @@ def cleanup() -> None:
 # Callbacks
 # =============================================================================
 
-def on_feedback(msg: SentData, sender_ip: str) -> None:
+def on_feedback(msg: SensorData, sender_ip: str) -> None:
     """Callback when feedback is received from an ESP32.
     
     Args:
-        msg: The received SentData message
+        msg: The received SensorData message
         sender_ip: IP address of the sender
     """
     global dashboard
@@ -134,6 +134,9 @@ def on_feedback(msg: SentData, sender_ip: str) -> None:
     
     # Extract motor data
     motor = msg.motor if hasattr(msg, 'motor') and msg.motor else None
+    
+    # Extract goal distance (new field)
+    goal_distance = getattr(msg, 'goal_distance', 0.0)
     
     # Check for errors - only show if there's a real error
     error_str = ""
@@ -145,7 +148,10 @@ def on_feedback(msg: SentData, sender_ip: str) -> None:
         elif isinstance(err, (int, float)) and err != 0:
             error_str = f"Error: {err}"
     
-    # Update dashboard with motor data
+    # Build mode string
+    mode_str = "Running" if motor and getattr(motor, 'mode', 0) == 2 else "Idle"
+    
+    # Update dashboard with motor data (including distance column)
     dashboard.update_motor(
         address=sender_ip,
         name=f"ESP32_{sender_ip.split('.')[-1]}",
@@ -154,9 +160,10 @@ def on_feedback(msg: SentData, sender_ip: str) -> None:
         torque=motor.torque if motor else 0.0,
         voltage=getattr(msg, 'voltage', 0.0),
         current=getattr(msg, 'current', 0.0),
-        mode="Running" if motor and getattr(motor, 'mode', 0) == 2 else "Idle",
+        mode=mode_str,
         switch=dashboard._switch_on,
         error=error_str,
+        distance=goal_distance if goal_distance >= 0 else -1.0,
     )
 
 
@@ -182,8 +189,8 @@ def run_control_loop(args: argparse.Namespace) -> None:
         
         # Create network server
         server = NetworkServer(
-            recv_type=SentData,
-            send_type=ReceivedData,
+            recv_type=SensorData,
+            send_type=MotorCommand,
             recv_port=args.listen_port,
             send_port=args.command_port,
             callback=on_feedback,
@@ -241,7 +248,7 @@ def run_control_loop(args: argparse.Namespace) -> None:
             )
             
             # Create command
-            cmd = ReceivedData(
+            cmd = MotorCommand(
                 target=target_pos,
                 target_vel=target_vel,
                 kp=DEFAULT_KP_GAIN,

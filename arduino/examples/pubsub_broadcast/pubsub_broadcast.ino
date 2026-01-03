@@ -46,15 +46,15 @@ const float CONTROL_RATE_HZ = 100.0f;
 cpy::Node node("motor_module");
 
 // Broadcast publisher - sends to ALL devices on network!
-cpy::Publisher<SentData>* feedbackPub = nullptr;
+cpy::Publisher<SensorData>* feedbackPub = nullptr;
 
 // Subscription - listens for commands from ANY device
-cpy::Subscription<ReceivedData>* commandSub = nullptr;
+cpy::Subscription<MotorCommand>* commandSub = nullptr;
 
 // State
 MotorData motorState = {};
 IMUData imuState = {};
-ReceivedData lastCommand = {};
+MotorCommand lastCommand = {};
 bool hasNewCommand = false;
 
 uint32_t loopCount = 0;
@@ -66,13 +66,13 @@ uint64_t lastStatsPrint = 0;
 
 void printStats();
 void controlLoop();
-void onCommandReceived(const ReceivedData& cmd);
+void onCommandReceived(const MotorCommand& cmd);
 
 // =============================================================================
 // Callbacks
 // =============================================================================
 
-void onCommandReceived(const ReceivedData& cmd) {
+void onCommandReceived(const MotorCommand& cmd) {
     lastCommand = cmd;
     hasNewCommand = true;
 }
@@ -92,7 +92,7 @@ void controlLoop() {
     }
     
     // Build and broadcast feedback
-    SentData feedback = {};
+    SensorData feedback = {};
     feedback.motor = motorState;
     feedback.imu = imuState;
     feedback.timestamp = micros() / 1000000.0f;
@@ -125,13 +125,13 @@ void setup() {
     
     // Create BROADCAST publisher - no IP address needed!
     // This sends to 255.255.255.255 (all devices on network)
-    feedbackPub = node.createBroadcastPublisher<SentData>(
+    feedbackPub = node.createBroadcastPublisher<SensorData>(
         "/motor/feedback",
         FEEDBACK_PORT      // Any device listening on this port will receive
     );
     
     // Create subscription - listens on specific port
-    commandSub = node.createSubscription<ReceivedData>(
+    commandSub = node.createSubscription<MotorCommand>(
         "/motor/command",
         onCommandReceived,
         COMMAND_PORT       // Listen for commands on this port

@@ -25,9 +25,9 @@
 // Message Definitions
 // ============================================================================
 
-// Command message received from server
-// Must match the Python SentDataStruct layout
-struct ReceivedData {
+// Command message received from server (MotorCommand)
+// Must match the Python MotorCommand layout
+struct MotorCommand {
     float target;
     float target_vel;
     float kp;
@@ -39,8 +39,8 @@ struct ReceivedData {
     float timestamp;
 };
 
-// Sensor data sent to server
-struct SentData {
+// Sensor data sent to server (SensorData)
+struct SensorData {
     int32_t module_id;
     int32_t receive_dt;
     int32_t timestamp;
@@ -83,6 +83,9 @@ struct SentData {
     // Error data
     int32_t reset_reason0;
     int32_t reset_reason1;
+    
+    // Goal distance (meters)
+    float goal_distance;
 };
 
 // ============================================================================
@@ -90,7 +93,7 @@ struct SentData {
 // ============================================================================
 
 // Create communication instance with our message types
-Capybarish::UDPComm<ReceivedData, SentData> comm;
+Capybarish::UDPComm<MotorCommand, SensorData> comm;
 
 // Module ID (unique for each device)
 const int MODULE_ID = 1;
@@ -110,8 +113,8 @@ void setup() {
     Serial.println("========================================");
     Serial.println("Capybarish Basic Communication Example");
     Serial.println("========================================");
-    Serial.printf("Receive message size: %d bytes\n", Capybarish::UDPComm<ReceivedData, SentData>::receiveSize());
-    Serial.printf("Send message size: %d bytes\n", Capybarish::UDPComm<ReceivedData, SentData>::sendSize());
+    Serial.printf("Receive message size: %d bytes\n", Capybarish::UDPComm<MotorCommand, SensorData>::receiveSize());
+    Serial.printf("Send message size: %d bytes\n", Capybarish::UDPComm<MotorCommand, SensorData>::sendSize());
     Serial.println();
     
     // Initialize communication
@@ -131,7 +134,7 @@ void setup() {
 
 void loop() {
     // Check for incoming commands
-    ReceivedData cmd;
+    MotorCommand cmd;
     if (comm.receive(cmd)) {
         // Process received command
         Serial.printf("Received: target=%.2f, kp=%.2f, kd=%.2f\n", 
@@ -146,7 +149,7 @@ void loop() {
         lastSendTime = millis();
         
         // Prepare sensor data
-        SentData data = {};  // Zero initialize
+        SensorData data = {};  // Zero initialize
         
         data.module_id = MODULE_ID;
         data.timestamp = micros();

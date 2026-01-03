@@ -7,17 +7,17 @@ intra-process communication using topics, publishers, and subscribers.
 Example Usage:
     ```python
     import capybarish as cpy
-    from capybarish.generated import ReceivedData, SentData
+    from capybarish.generated import MotorCommand, SensorData
     
     # Create a node
     node = cpy.Node('motor_controller')
     
     # Create publisher and subscriber
-    pub = node.create_publisher(ReceivedData, '/motor/command', qos_depth=10)
-    sub = node.create_subscription(SentData, '/motor/feedback', callback, qos_depth=10)
+    pub = node.create_publisher(MotorCommand, '/motor/command', qos_depth=10)
+    sub = node.create_subscription(SensorData, '/motor/feedback', callback, qos_depth=10)
     
     # Publish messages
-    msg = ReceivedData(target=1.5, target_vel=0.0, kp=10.0, kd=0.5)
+    msg = MotorCommand(target=1.5, target_vel=0.0, kp=10.0, kd=0.5)
     pub.publish(msg)
     
     # Spin to process callbacks
@@ -347,8 +347,8 @@ class Publisher(Generic[MsgT]):
     
     Example:
         ```python
-        pub = node.create_publisher(ReceivedData, '/motor/command', qos_depth=10)
-        msg = ReceivedData(target=1.5, target_vel=0.0)
+        pub = node.create_publisher(MotorCommand, '/motor/command', qos_depth=10)
+        msg = MotorCommand(target=1.5, target_vel=0.0)
         pub.publish(msg)
         ```
     """
@@ -446,10 +446,10 @@ class Subscription(Generic[MsgT]):
     
     Example:
         ```python
-        def callback(msg: SentData):
+        def callback(msg: SensorData):
             print(f"Received: pos={msg.motor.position}")
         
-        sub = node.create_subscription(SentData, '/motor/feedback', callback)
+        sub = node.create_subscription(SensorData, '/motor/feedback', callback)
         ```
     """
     
@@ -689,8 +689,8 @@ class Node:
         ```python
         node = Node('motor_controller')
         
-        pub = node.create_publisher(ReceivedData, '/motor/command')
-        sub = node.create_subscription(SentData, '/motor/feedback', my_callback)
+        pub = node.create_publisher(MotorCommand, '/motor/command')
+        sub = node.create_subscription(SensorData, '/motor/feedback', my_callback)
         timer = node.create_timer(0.01, control_loop)  # 100 Hz
         ```
     """
@@ -1182,21 +1182,21 @@ class NetworkServer(Generic[MsgT]):
     Example:
         ```python
         from capybarish.pubsub import NetworkServer
-        from capybarish.generated import ReceivedData, SentData
+        from capybarish.generated import MotorCommand, SensorData
         
-        def on_feedback(msg: SentData, addr: str):
+        def on_feedback(msg: SensorData, addr: str):
             print(f"Feedback from {addr}: pos={msg.motor.pos}")
         
         server = NetworkServer(
-            recv_type=SentData,
-            send_type=ReceivedData,
+            recv_type=SensorData,
+            send_type=MotorCommand,
             recv_port=6666,
             send_port=6667,
             callback=on_feedback,
         )
         
         # Send to all discovered clients
-        cmd = ReceivedData(target=1.0, kp=10.0)
+        cmd = MotorCommand(target=1.0, kp=10.0)
         server.send_to_all(cmd)
         
         # Or send to specific client

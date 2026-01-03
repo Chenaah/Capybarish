@@ -16,8 +16,8 @@
 #include "motor_control_messages.hpp"
 
 // Use the motor_control namespace for message types
-using motor_control::SentData;
-using motor_control::ReceivedData;
+using motor_control::SensorData;
+using motor_control::MotorCommand;
 using motor_control::MotorData;
 using motor_control::IMUData;
 
@@ -44,11 +44,11 @@ const uint16_t COMMAND_PORT = 6667;   // Port to receive commands on
 // =============================================================================
 
 cpy::Node* node = nullptr;
-cpy::Publisher<SentData>* feedbackPub = nullptr;
-cpy::Subscription<ReceivedData>* commandSub = nullptr;
+cpy::Publisher<SensorData>* feedbackPub = nullptr;
+cpy::Subscription<MotorCommand>* commandSub = nullptr;
 
 // Latest command received
-ReceivedData latestCommand;
+MotorCommand latestCommand;
 bool hasNewCommand = false;
 
 // Motor state (simulated)
@@ -59,7 +59,7 @@ float motorVel = 0.0f;
 // Forward Declarations
 // =============================================================================
 
-void onCommandReceived(const ReceivedData& cmd);
+void onCommandReceived(const MotorCommand& cmd);
 void controlLoop();
 void printStats();
 
@@ -67,7 +67,7 @@ void printStats();
 // Callback: Command Received
 // =============================================================================
 
-void onCommandReceived(const ReceivedData& cmd) {
+void onCommandReceived(const MotorCommand& cmd) {
     latestCommand = cmd;
     hasNewCommand = true;
 }
@@ -87,7 +87,7 @@ void controlLoop() {
     }
     
     // Send feedback
-    SentData feedback;
+    SensorData feedback;
     feedback.motor.pos = motorPos;
     feedback.motor.vel = motorVel;
     feedback.motor.torque = 0.0f;
@@ -147,7 +147,7 @@ void setup() {
     node = new cpy::Node("esp32_motor");
     
     // Create publisher - sends feedback DIRECTLY to server
-    feedbackPub = node->createPublisher<SentData>(
+    feedbackPub = node->createPublisher<SensorData>(
         "/motor_feedback",
         SERVER_IP,       // Direct IP, not broadcast!
         FEEDBACK_PORT
@@ -155,7 +155,7 @@ void setup() {
     
     // Create subscriber - listens for commands
     // Signature: createSubscription<T>(topic, callback, port)
-    commandSub = node->createSubscription<ReceivedData>(
+    commandSub = node->createSubscription<MotorCommand>(
         "/motor_cmd",
         onCommandReceived,
         COMMAND_PORT

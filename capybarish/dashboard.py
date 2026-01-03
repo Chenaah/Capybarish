@@ -88,6 +88,7 @@ class DeviceInfo:
     temperature: float = 0.0
     mode: str = "unknown"
     error: str = ""
+    distance: float = -1.0  # Goal distance (-1 = not available)
     
     # Custom data fields
     custom_data: Dict[str, Any] = field(default_factory=dict)
@@ -340,8 +341,8 @@ class RichDashboard:
         switch_str = "[green]ON[/green]" if self._switch_on else "[red]OFF[/red]"
         
         header = Text()
-        header.append(f"🤖 {self.config.title}", style="bold blue")
-        header.append(f" | Runtime: {runtime:.1f}s", style="dim")
+        # header.append(f"🤖 {self.config.title}", style="bold blue")
+        header.append(f"Runtime: {runtime:.1f}s", style="dim")
         header.append(f" | Switch: {switch_str}")
         header.append(f" | Mission: {self._mission_type}", style="cyan")
         header.append(f" | Devices: {active_count}/{total_count}", style="yellow")
@@ -518,6 +519,7 @@ class MotorDashboard(RichDashboard):
             ColumnConfig("Torque", "torque", format_func=lambda x: f"{x:+.3f}"),
             ColumnConfig("Voltage", "voltage", format_func=lambda x: f"{x:.1f}V"),
             ColumnConfig("Current", "current", format_func=lambda x: f"{x:.2f}A"),
+            ColumnConfig("Distance", "distance", format_func=lambda x: f"{x:.3f}m" if x >= 0 else "-"),
             ColumnConfig("Switch", "switch", style_func=MotorDashboard._switch_style),
             ColumnConfig("Error", "error", style_func=MotorDashboard._error_style),
         ]
@@ -559,6 +561,7 @@ class MotorDashboard(RichDashboard):
         mode: str = "unknown",
         switch: bool = False,
         error: str = "",
+        distance: float = -1.0,
         **kwargs
     ) -> None:
         """Update motor-specific data for a device.
@@ -573,6 +576,7 @@ class MotorDashboard(RichDashboard):
             mode: Motor mode string
             switch: Switch state
             error: Error message if any
+            distance: Goal distance in meters (-1 = not available)
             **kwargs: Additional custom data
         """
         self.update_device(
@@ -585,6 +589,7 @@ class MotorDashboard(RichDashboard):
             mode=mode,
             switch=switch,
             error=error,
+            distance=distance,
             **kwargs
         )
 
