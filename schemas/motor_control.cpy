@@ -2,7 +2,7 @@
 # This schema defines message types for robot motor control and sensor feedback
 #
 # Usage:
-#   capybarish-gen --python --cpp schemas/motor_control.cpy
+#   capybarish gen --python --cpp schemas/motor_control.cpy --output generated/
 #
 # Compatible with ESP32/Arduino and Python
 
@@ -13,7 +13,7 @@ package motor_control
 # ============================================================================
 
 # Motor command sent from server to robot module
-message ReceivedData:
+message MotorCommand:
     float32 target           # Target position (radians)
     float32 target_vel       # Target velocity (rad/s)
     float32 kp               # Proportional gain
@@ -78,7 +78,7 @@ message ErrorData:
     int32 reset_reason1      # CPU1 reset reason
 
 # Complete sensor data from robot module
-message SentData:
+message SensorData:
     int32 module_id          # Unique module identifier
     int32 receive_dt         # Receive processing time (µs)
     int32 timestamp          # Current timestamp (µs)
@@ -88,3 +88,4 @@ message SentData:
     MotorData motor          # Motor sensor data
     IMUData imu              # IMU sensor data
     ErrorData error          # Error/reset data
+    float32 goal_distance    # Distance to goal (meters)

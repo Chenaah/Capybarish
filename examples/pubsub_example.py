@@ -34,7 +34,7 @@ from capybarish.pubsub import (
 )
 
 # Import generated message types
-from capybarish.generated import ReceivedData, SentData, MotorData, IMUData
+from capybarish.generated import MotorCommand, SensorData, MotorData, IMUData
 
 
 # =============================================================================
@@ -54,17 +54,17 @@ def simple_pubsub_example():
     # Track received messages
     received_messages = []
     
-    def callback(msg: ReceivedData):
+    def callback(msg: MotorCommand):
         received_messages.append(msg)
         logger.info(f"Received: target={msg.target:.2f}, vel={msg.target_vel:.2f}")
     
     # Create publisher and subscriber on the same topic
-    pub = node.create_publisher(ReceivedData, '/motor/command', qos_depth=10)
-    sub = node.create_subscription(ReceivedData, '/motor/command', callback, qos_depth=10)
+    pub = node.create_publisher(MotorCommand, '/motor/command', qos_depth=10)
+    sub = node.create_subscription(MotorCommand, '/motor/command', callback, qos_depth=10)
     
     # Publish some messages
     for i in range(5):
-        msg = ReceivedData(
+        msg = MotorCommand(
             target=float(i) * 0.5,
             target_vel=1.0,
             kp=10.0,
@@ -100,12 +100,12 @@ def timer_publishing_example():
     node = Node('timer_publisher')
     logger = node.get_logger()
     
-    pub = node.create_publisher(ReceivedData, '/motor/command')
+    pub = node.create_publisher(MotorCommand, '/motor/command')
     
     publish_count = [0]  # Use list for closure
     
     def timer_callback():
-        msg = ReceivedData(
+        msg = MotorCommand(
             target=float(publish_count[0]) * 0.01,
             target_vel=0.0,
             kp=10.0,
@@ -142,21 +142,21 @@ def multi_node_example():
     
     # Controller node - sends commands
     controller = Node('controller')
-    cmd_pub = controller.create_publisher(ReceivedData, '/robot/command')
+    cmd_pub = controller.create_publisher(MotorCommand, '/robot/command')
     
     # Robot node - receives commands, sends feedback
     robot = Node('robot')
-    feedback_pub = robot.create_publisher(SentData, '/robot/feedback')
+    feedback_pub = robot.create_publisher(SensorData, '/robot/feedback')
     
     command_count = [0]
     feedback_count = [0]
     
-    def command_callback(msg: ReceivedData):
+    def command_callback(msg: MotorCommand):
         command_count[0] += 1
         robot.get_logger().info(f"Robot received command: target={msg.target:.2f}")
         
         # Send feedback
-        feedback = SentData(
+        feedback = SensorData(
             motor=MotorData(
                 pos=msg.target * 0.9,  # Simulated position
                 vel=msg.target_vel,
@@ -167,17 +167,17 @@ def multi_node_example():
         )
         feedback_pub.publish(feedback)
     
-    def feedback_callback(msg: SentData):
+    def feedback_callback(msg: SensorData):
         feedback_count[0] += 1
         controller.get_logger().info(f"Controller received feedback: pos={msg.motor.pos:.2f}")
     
     # Create subscriptions
-    robot.create_subscription(ReceivedData, '/robot/command', command_callback)
-    controller.create_subscription(SentData, '/robot/feedback', feedback_callback)
+    robot.create_subscription(MotorCommand, '/robot/command', command_callback)
+    controller.create_subscription(SensorData, '/robot/feedback', feedback_callback)
     
     # Send commands
     for i in range(3):
-        cmd = ReceivedData(target=float(i + 1), target_vel=0.5, kp=10.0, kd=0.5)
+        cmd = MotorCommand(target=float(i + 1), target_vel=0.5, kp=10.0, kd=0.5)
         cmd_pub.publish(cmd)
         
         # Process both nodes
@@ -220,7 +220,7 @@ def qos_example():
     )
     
     cmd_pub = node.create_publisher(
-        ReceivedData, 
+        MotorCommand, 
         '/motor/command', 
         qos_profile=QoSProfile.default()
     )
@@ -249,7 +249,7 @@ def introspection_example():
     node1.create_publisher(MotorData, '/sensors/motor')
     
     node2.create_subscription(IMUData, '/sensors/imu', lambda m: None)
-    node2.create_publisher(ReceivedData, '/control/command')
+    node2.create_publisher(MotorCommand, '/control/command')
     
     # List all topics
     print("\nRegistered Topics:")
@@ -276,14 +276,14 @@ def rate_example():
     print("=" * 60)
     
     node = Node('rate_example')
-    pub = node.create_publisher(ReceivedData, '/command')
+    pub = node.create_publisher(MotorCommand, '/command')
     
     rate = Rate(50)  # 50 Hz
     count = 0
     start = time.time()
     
     while time.time() - start < 0.2:  # Run for 0.2 seconds
-        msg = ReceivedData(target=float(count) * 0.1)
+        msg = MotorCommand(target=float(count) * 0.1)
         pub.publish(msg)
         count += 1
         
@@ -313,14 +313,14 @@ def namespace_example():
     robot2 = Node('controller', namespace='robot2')
     
     # These publish to different topics despite same relative name
-    pub1 = robot1.create_publisher(ReceivedData, 'command')  # -> /robot1/command
-    pub2 = robot2.create_publisher(ReceivedData, 'command')  # -> /robot2/command
+    pub1 = robot1.create_publisher(MotorCommand, 'command')  # -> /robot1/command
+    pub2 = robot2.create_publisher(MotorCommand, 'command')  # -> /robot2/command
     
     print(f"Robot1 publishes to: {pub1.topic_name}")
     print(f"Robot2 publishes to: {pub2.topic_name}")
     
     # Absolute topic names ignore namespace
-    global_pub = robot1.create_publisher(ReceivedData, '/global/command')
+    global_pub = robot1.create_publisher(MotorCommand, '/global/command')
     print(f"Global publisher topic: {global_pub.topic_name}")
     
     robot1.destroy()
@@ -338,10 +338,10 @@ def context_manager_example():
     print("=" * 60)
     
     with Node('context_example') as node:
-        pub = node.create_publisher(ReceivedData, '/test')
+        pub = node.create_publisher(MotorCommand, '/test')
         
         for i in range(3):
-            msg = ReceivedData(target=float(i))
+            msg = MotorCommand(target=float(i))
             pub.publish(msg)
             print(f"Published message {i}")
         

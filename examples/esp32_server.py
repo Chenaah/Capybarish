@@ -22,7 +22,7 @@ import socket
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from capybarish.pubsub import NetworkServer, Rate
-from capybarish.generated import ReceivedData, SentData
+from capybarish.generated import MotorCommand, SensorData
 
 
 # =============================================================================
@@ -42,7 +42,7 @@ CONTROL_RATE = 100.0  # Hz
 # Track new discoveries
 discovered_ips = set()
 
-def on_feedback(msg: SentData, sender_ip: str):
+def on_feedback(msg: SensorData, sender_ip: str):
     """Callback when feedback is received from an ESP32."""
     global discovered_ips
     
@@ -79,8 +79,8 @@ def main():
     
     # Create network server using the pub/sub API
     server = NetworkServer(
-        recv_type=SentData,
-        send_type=ReceivedData,
+        recv_type=SensorData,
+        send_type=MotorCommand,
         recv_port=LISTEN_PORT,
         send_port=COMMAND_PORT,
         callback=on_feedback,
@@ -119,7 +119,7 @@ def main():
                 direction *= -1
             
             # Create command
-            cmd = ReceivedData(
+            cmd = MotorCommand(
                 target=target_pos,
                 target_vel=0.0,
                 kp=10.0,

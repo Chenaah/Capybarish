@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import capybarish as cpy
 from capybarish.pubsub import Node, init, shutdown, Rate
-from capybarish.generated import ReceivedData, SentData, MotorData, IMUData
+from capybarish.generated import MotorCommand, SensorData, MotorData, IMUData
 
 
 class MotorSimulator:
@@ -83,7 +83,7 @@ class RobotSubscriber:
         
         # Create subscriber for motor commands
         self.command_sub = self.node.create_subscription(
-            ReceivedData,
+            MotorCommand,
             '/robot/motor_command', 
             self.command_callback,
             qos_depth=10
@@ -91,7 +91,7 @@ class RobotSubscriber:
         
         # Create publisher for feedback
         self.feedback_pub = self.node.create_publisher(
-            SentData,
+            SensorData,
             '/robot/feedback',
             qos_depth=10
         )
@@ -145,10 +145,10 @@ class RobotSubscriber:
                 
                 data, addr = self.network_socket.recvfrom(1024)
                 
-                # Try to deserialize as ReceivedData
+                # Try to deserialize as MotorCommand
                 try:
-                    if hasattr(ReceivedData, 'deserialize'):
-                        msg = ReceivedData.deserialize(data)
+                    if hasattr(MotorCommand, 'deserialize'):
+                        msg = MotorCommand.deserialize(data)
                         self.logger.info(f"Received network command from {addr[0]}")
                         self.process_command(msg)
                 except:
@@ -162,11 +162,11 @@ class RobotSubscriber:
                     self.logger.warning(f"Network error: {e}")
                 break
     
-    def command_callback(self, msg: ReceivedData):
+    def command_callback(self, msg: MotorCommand):
         """Handle incoming motor commands."""
         self.process_command(msg)
     
-    def process_command(self, msg: ReceivedData):
+    def process_command(self, msg: MotorCommand):
         """Process a motor command and send feedback."""
         self.command_count += 1
         
@@ -181,7 +181,7 @@ class RobotSubscriber:
         motor_data = self.motor.update(msg.target, msg.target_vel, msg.kp, msg.kd)
         
         # Create feedback message
-        feedback = SentData(
+        feedback = SensorData(
             motor=motor_data,
             imu=IMUData(  # Empty IMU data for this example
                 accel_x=0.0,

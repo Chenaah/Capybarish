@@ -46,7 +46,9 @@ from .utils import load_cfg
 from .dashboard import (
     RichDashboard,
     MotorDashboard,
+    RLDashboard,
     DashboardConfig,
+    RLDashboardConfig,
     DeviceInfo,
     DeviceStatus,
     ColumnConfig,
@@ -109,7 +111,9 @@ __all__ = [
     # Modular Dashboard
     "RichDashboard",
     "MotorDashboard",
+    "RLDashboard",
     "DashboardConfig",
+    "RLDashboardConfig",
     "DeviceInfo",
     "DeviceStatus",
     "ColumnConfig",

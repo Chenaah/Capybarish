@@ -19,7 +19,7 @@ import argparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from capybarish.generated import ReceivedData, SentData
+from capybarish.generated import MotorCommand, SensorData
 
 
 # =============================================================================
@@ -107,7 +107,7 @@ def main():
                     direction *= -1
                 
                 # Create command
-                cmd = ReceivedData(
+                cmd = MotorCommand(
                     target=target_pos,
                     target_vel=0.0,
                     kp=10.0,
@@ -128,8 +128,8 @@ def main():
             try:
                 data, addr = recv_sock.recvfrom(4096)
                 
-                if len(data) >= SentData._SIZE:
-                    last_fb = SentData.deserialize(data)
+                if len(data) >= SensorData._SIZE:
+                    last_fb = SensorData.deserialize(data)
                     last_fb_time = now
                     fb_count += 1
                     

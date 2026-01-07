@@ -31,7 +31,7 @@ from typing import Dict, Set
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from capybarish.pubsub import NetworkServer, Rate
-from capybarish.generated import ReceivedData, SentData, MotorData, IMUData
+from capybarish.generated import MotorCommand, SensorData, MotorData, IMUData
 
 
 class RobotFleetServer:
@@ -43,8 +43,8 @@ class RobotFleetServer:
         
         # Create network server
         self.server = NetworkServer(
-            recv_type=SentData,
-            send_type=ReceivedData,
+            recv_type=SensorData,
+            send_type=MotorCommand,
             recv_port=listen_port,
             send_port=command_port,
             callback=self.on_robot_feedback,
@@ -97,7 +97,7 @@ class RobotFleetServer:
         print("   Configure ESP32 to send feedback to this server")
         print()
         
-    def on_robot_feedback(self, msg: SentData, sender_ip: str):
+    def on_robot_feedback(self, msg: SensorData, sender_ip: str):
         """Callback when feedback is received from a robot."""
         self.feedback_count += 1
         
@@ -111,10 +111,10 @@ class RobotFleetServer:
         # Update display
         self.update_display()
     
-    def generate_formation_command(self, robot_index: int, total_robots: int) -> ReceivedData:
+    def generate_formation_command(self, robot_index: int, total_robots: int) -> MotorCommand:
         """Generate command for formation mission."""
         if total_robots == 0:
-            return ReceivedData(target=0.0, target_vel=0.0, kp=5.0, kd=1.0)
+            return MotorCommand(target=0.0, target_vel=0.0, kp=5.0, kd=1.0)
             
         # Circular formation
         angle_offset = (2 * math.pi * robot_index) / total_robots
@@ -127,7 +127,7 @@ class RobotFleetServer:
         target_pos = target_x
         target_vel = -self.formation_radius * self.formation_speed * 2 * math.pi * math.sin(current_angle)
         
-        return ReceivedData(
+        return MotorCommand(
             target=target_pos,
             target_vel=target_vel,
             kp=8.0,
@@ -139,10 +139,10 @@ class RobotFleetServer:
             timestamp=self.mission_time
         )
     
-    def generate_follow_leader_command(self, robot_index: int, total_robots: int) -> ReceivedData:
+    def generate_follow_leader_command(self, robot_index: int, total_robots: int) -> MotorCommand:
         """Generate command for follow leader mission."""
         if total_robots == 0:
-            return ReceivedData(target=0.0, target_vel=0.0, kp=5.0, kd=1.0)
+            return MotorCommand(target=0.0, target_vel=0.0, kp=5.0, kd=1.0)
         
         # Leader follows sine wave, followers follow with offset
         leader_pos = 2.0 * math.sin(self.mission_time * 0.5)
@@ -156,7 +156,7 @@ class RobotFleetServer:
             target_pos = leader_pos - offset
             target_vel = leader_vel * 0.8  # Slightly slower
             
-        return ReceivedData(
+        return MotorCommand(
             target=target_pos,
             target_vel=target_vel,
             kp=10.0,
@@ -166,14 +166,14 @@ class RobotFleetServer:
             timestamp=self.mission_time
         )
     
-    def generate_scatter_command(self, robot_index: int, total_robots: int) -> ReceivedData:
+    def generate_scatter_command(self, robot_index: int, total_robots: int) -> MotorCommand:
         """Generate command for scatter mission."""
         # Each robot gets a unique random-ish target
         seed_offset = robot_index * 1234.5
         target_pos = 1.5 * math.sin(self.mission_time * 0.3 + seed_offset)
         target_vel = 0.45 * math.cos(self.mission_time * 0.3 + seed_offset)
         
-        return ReceivedData(
+        return MotorCommand(
             target=target_pos,
             target_vel=target_vel,
             kp=6.0,
@@ -204,7 +204,7 @@ class RobotFleetServer:
             elif self.mission_type == "scatter":
                 cmd = self.generate_scatter_command(i, total_robots)
             else:
-                cmd = ReceivedData(target=0.0, target_vel=0.0, kp=5.0, kd=1.0)
+                cmd = MotorCommand(target=0.0, target_vel=0.0, kp=5.0, kd=1.0)
             
             # Send command to this robot
             if self.server.send_to(robot_ip, cmd):

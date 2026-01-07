@@ -95,17 +95,18 @@ capybarish init --output my_messages.cpy
 ### Python
 
 ```python
-from generated.motor_control_messages import ReceivedData, SentData
+from generated.motor_control_messages import MotorCommand, SensorData
 
 # Create and serialize
-cmd = ReceivedData()
+cmd = MotorCommand()
 cmd.target = 1.5
 cmd.kp = 10.0
 data = cmd.serialize()
 
 # Deserialize
-received = SentData.deserialize(data)
+received = SensorData.deserialize(data)
 print(f"Position: {received.motor.pos}")
+print(f"Distance: {received.goal_distance}")
 ```
 
 ### C++ (Arduino/ESP32)
@@ -117,16 +118,17 @@ print(f"Position: {received.motor.pos}")
 using namespace motor_control;
 
 // Create communication
-Capybarish::UDPComm<ReceivedData, SentData> comm;
+Capybarish::UDPComm<MotorCommand, SensorData> comm;
 
 // Receive and send
-ReceivedData cmd;
+MotorCommand cmd;
 if (comm.receive(cmd)) {
     // Process command
 }
 
-SentData status;
+SensorData status;
 status.motor.pos = 1.5f;
+status.goal_distance = 2.5f;  // Distance to goal in meters
 comm.send(status);
 ```
 

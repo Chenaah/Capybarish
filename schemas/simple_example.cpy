@@ -2,7 +2,7 @@
 # A minimal schema demonstrating basic message types
 #
 # Usage:
-#   capybarish-gen --python --cpp schemas/simple_example.cpy
+#   capybarish gen --python --cpp schemas/simple_example.cpy
 
 package simple
 

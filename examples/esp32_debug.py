@@ -18,7 +18,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from capybarish.generated import ReceivedData, SentData
+from capybarish.generated import MotorCommand, SensorData
 
 # =============================================================================
 # Configuration - UPDATE THESE!
@@ -95,7 +95,7 @@ def main():
     print("[4] Sending test command to ESP32...")
     
     # Create a test command
-    cmd = ReceivedData(
+    cmd = MotorCommand(
         target=1.0,
         target_vel=0.0,
         kp=10.0,
@@ -127,14 +127,14 @@ def main():
             
             print(f"    ✓ Received {len(data)} bytes from {addr}")
             
-            # Try to parse as SentData
-            if len(data) >= SentData._SIZE:
-                fb = SentData.deserialize(data)
+            # Try to parse as SensorData
+            if len(data) >= SensorData._SIZE:
+                fb = SensorData.deserialize(data)
                 print(f"      Motor pos: {fb.motor.pos:.3f}")
                 print(f"      Motor vel: {fb.motor.vel:.3f}")
                 print(f"      Timestamp: {fb.timestamp}")
             else:
-                print(f"      (Raw data, wrong size: expected {SentData._SIZE}, got {len(data)})")
+                print(f"      (Raw data, wrong size: expected {SensorData._SIZE}, got {len(data)})")
                 
         except socket.timeout:
             print(f"    ... waiting ({i+1}/10)")

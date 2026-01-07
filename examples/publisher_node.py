@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import capybarish as cpy
 from capybarish.pubsub import Node, init, shutdown, Rate
-from capybarish.generated import ReceivedData, SentData, MotorData, IMUData
+from capybarish.generated import MotorCommand, SensorData, MotorData, IMUData
 
 
 class CommandPublisher:
@@ -35,7 +35,7 @@ class CommandPublisher:
         
         # Create publishers for different types of data
         self.motor_cmd_pub = self.node.create_publisher(
-            ReceivedData, 
+            MotorCommand, 
             '/robot/motor_command',
             qos_depth=10
         )
@@ -46,7 +46,7 @@ class CommandPublisher:
         
         # Also create a feedback subscriber to show bidirectional communication
         self.feedback_sub = self.node.create_subscription(
-            SentData,
+            SensorData,
             '/robot/feedback',
             self.feedback_callback,
             qos_depth=10
@@ -65,7 +65,7 @@ class CommandPublisher:
         self.logger.info(f"Publishing motor commands to: {self.motor_cmd_pub.topic_name}")
         self.logger.info(f"Listening for feedback on: {self.feedback_sub.topic_name}")
         
-    def feedback_callback(self, msg: SentData):
+    def feedback_callback(self, msg: SensorData):
         """Handle feedback from subscriber nodes."""
         self.feedback_count += 1
         self.logger.info(
@@ -85,7 +85,7 @@ class CommandPublisher:
                      math.cos(2 * math.pi * self.target_frequency * current_time))
         
         # Create command message
-        cmd = ReceivedData(
+        cmd = MotorCommand(
             target=target_pos,
             target_vel=target_vel,
             kp=10.0,

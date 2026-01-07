@@ -4,8 +4,8 @@ ESP32 Pub/Sub Companion Script
 
 This script runs on the server (PC) and communicates with ESP32 modules
 using the pub/sub pattern. It demonstrates bidirectional communication:
-- Server sends commands to ESP32 (ReceivedData)
-- ESP32 sends feedback to server (SentData)
+- Server sends commands to ESP32 (MotorCommand)
+- ESP32 sends feedback to server (SensorData)
 
 Usage:
     python examples/esp32_companion.py
@@ -28,7 +28,7 @@ import capybarish as cpy
 from capybarish.pubsub import Node, Rate, QoSProfile, spin_once, init, shutdown, ok
 
 # Import generated messages
-from capybarish.generated import ReceivedData, SentData, MotorData, IMUData
+from capybarish.generated import MotorCommand, SensorData, MotorData, IMUData
 
 
 # =============================================================================
@@ -64,7 +64,7 @@ class FeedbackReceiver:
         self.thread = None
         
         # Latest feedback from each module (keyed by IP)
-        self.feedback: dict[str, SentData] = {}
+        self.feedback: dict[str, SensorData] = {}
         self.lock = threading.Lock()
         
         # Statistics
@@ -98,8 +98,8 @@ class FeedbackReceiver:
                 data, addr = self.socket.recvfrom(4096)
                 
                 # Deserialize feedback
-                if len(data) >= SentData._SIZE:
-                    feedback = SentData.deserialize(data)
+                if len(data) >= SensorData._SIZE:
+                    feedback = SensorData.deserialize(data)
                     
                     with self.lock:
                         self.feedback[addr[0]] = feedback
@@ -110,12 +110,12 @@ class FeedbackReceiver:
             except Exception as e:
                 print(f"[FeedbackReceiver] Error: {e}")
     
-    def get_feedback(self, ip: str) -> SentData | None:
+    def get_feedback(self, ip: str) -> SensorData | None:
         """Get latest feedback from a module."""
         with self.lock:
             return self.feedback.get(ip)
     
-    def get_all_feedback(self) -> dict[str, SentData]:
+    def get_all_feedback(self) -> dict[str, SensorData]:
         """Get feedback from all modules."""
         with self.lock:
             return dict(self.feedback)
@@ -132,7 +132,7 @@ class CommandSender:
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.send_count = 0
     
-    def send(self, cmd: ReceivedData, address: tuple[str, int]) -> bool:
+    def send(self, cmd: MotorCommand, address: tuple[str, int]) -> bool:
         """Send command to an ESP32 module."""
         try:
             data = cmd.serialize()
@@ -143,7 +143,7 @@ class CommandSender:
             print(f"[CommandSender] Error sending to {address}: {e}")
             return False
     
-    def broadcast(self, cmd: ReceivedData, addresses: list[tuple[str, int]]):
+    def broadcast(self, cmd: MotorCommand, addresses: list[tuple[str, int]]):
         """Send command to multiple modules."""
         for addr in addresses:
             self.send(cmd, addr)
@@ -197,7 +197,7 @@ def main():
                 direction = 1
             
             # Create command message
-            cmd = ReceivedData(
+            cmd = MotorCommand(
                 target=target_pos,
                 target_vel=0.0,
                 kp=10.0,
@@ -272,16 +272,16 @@ def main_pubsub():
     # Track received feedback
     feedback_data = {}
     
-    def on_feedback(msg: SentData):
+    def on_feedback(msg: SensorData):
         # In real usage, you'd need to track which module sent this
         feedback_data['latest'] = msg
         logger.info(f"Feedback: pos={msg.motor.pos:.3f}, vel={msg.motor.vel:.3f}")
     
     # Create publisher for commands (local pub, will send to network)
-    cmd_pub = node.create_publisher(ReceivedData, '/motor/command', qos_depth=1)
+    cmd_pub = node.create_publisher(MotorCommand, '/motor/command', qos_depth=1)
     
     # Create subscriber for feedback
-    fb_sub = node.create_subscription(SentData, '/motor/feedback', on_feedback, qos_depth=10)
+    fb_sub = node.create_subscription(SensorData, '/motor/feedback', on_feedback, qos_depth=10)
     
     # For network communication, we need to:
     # 1. Add remote endpoint to publisher
@@ -304,7 +304,7 @@ def main_pubsub():
             if abs(target) > 1.0:
                 direction *= -1
             
-            cmd = ReceivedData(
+            cmd = MotorCommand(
                 target=target,
                 target_vel=0.0,
                 kp=10.0,
