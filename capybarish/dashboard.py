@@ -729,8 +729,8 @@ class RLDashboardConfig:
     theme: str = "cyber"  # cyber, matrix, minimal, retro
     
     # Display mode options
-    fullscreen: bool = True       # If False, dashboard doesn't take over terminal
-    capture_prints: bool = True   # If True, captures print() calls to log panel
+    fullscreen: bool = False # True       # If False, dashboard doesn't take over terminal
+    capture_prints: bool = False # True   # If True, captures print() calls to log panel
     dashboard_height: int = 30    # Height in lines when fullscreen=False
 
 
@@ -840,6 +840,12 @@ class RLDashboard:
         self._selected_command_idx: int = 0
         self._onehot_mode: bool = False
         self._keyboard_command_mode: bool = False
+        
+        # Model tracking for multi-model mode
+        self._model_names: List[str] = []
+        self._model_obs_dims: List[int] = []
+        self._current_model_idx: int = 0
+        self._num_models: int = 0
         
         # Log/message buffer for debug output
         self._log_messages: List[Tuple[float, str, str]] = []  # (timestamp, level, message)
@@ -1030,6 +1036,16 @@ class RLDashboard:
                 header.append(f"⏳{connected}/{total}", style=self.theme['warning'])
             else:
                 header.append(f"✓{connected}/{total}", style=self.theme['accent'])
+        
+        # Show model info in multi-model mode
+        if self._num_models > 1:
+            header.append(f" │ ", style=self.theme['dim'])
+            header.append("🤖", style=self.theme['accent'])
+            current_name = self._model_names[self._current_model_idx] if self._current_model_idx < len(self._model_names) else "?"
+            # Truncate name for compact display
+            display_name = current_name[:12] if len(current_name) > 12 else current_name
+            header.append(f"[{self._current_model_idx + 1}/{self._num_models}]", style=self.theme['secondary'])
+            header.append(f" {display_name}", style=self.theme['accent'])
         
         # Motor status line
         motor_line = Text()
@@ -1236,6 +1252,24 @@ class RLDashboard:
         self._onehot_mode = onehot_mode
         self._keyboard_command_mode = keyboard_mode
     
+    def update_models(
+        self,
+        model_names: List[str],
+        current_idx: int = 0,
+        obs_dims: List[int] = None,
+    ) -> None:
+        """Update loaded models state for display.
+        
+        Args:
+            model_names: List of model display names
+            current_idx: Index of the currently active model
+            obs_dims: Optional list of observation dimensions for each model
+        """
+        self._model_names = list(model_names) if model_names else []
+        self._current_model_idx = current_idx
+        self._num_models = len(self._model_names)
+        self._model_obs_dims = list(obs_dims) if obs_dims else []
+    
     def update_performance(
         self,
         loop_dt: float = 0.0,
@@ -1355,12 +1389,22 @@ class RLDashboard:
             Layout(name="right", ratio=3),
         )
         
-        # Left side: Motors + Commands + Log
-        layout["left"].split_column(
-            Layout(name="motors", ratio=2),
-            Layout(name="commands", ratio=1),
-            Layout(name="log", ratio=1),
-        )
+        # Left side layout depends on whether models are loaded
+        if self._num_models > 1:
+            # Multi-model mode: Motors + Models + Commands + Log
+            layout["left"].split_column(
+                Layout(name="motors", ratio=2),
+                Layout(name="models", ratio=1),
+                Layout(name="commands", ratio=1),
+                Layout(name="log", ratio=1),
+            )
+        else:
+            # Single model mode: Motors + Commands + Log
+            layout["left"].split_column(
+                Layout(name="motors", ratio=2),
+                Layout(name="commands", ratio=1),
+                Layout(name="log", ratio=1),
+            )
         
         # Right side: Observations + Actions/System
         layout["right"].split_column(
@@ -1377,6 +1421,8 @@ class RLDashboard:
         # Populate panels
         layout["header"].update(self._generate_header())
         layout["motors"].update(self._generate_motor_panel())
+        if self._num_models > 1:
+            layout["models"].update(self._generate_models_panel())
         layout["commands"].update(self._generate_command_panel())
         layout["log"].update(self._generate_log_panel())
         layout["observations"].update(self._generate_observation_panel())
@@ -1612,6 +1658,62 @@ class RLDashboard:
             box=box.ROUNDED
         )
     
+    def _generate_models_panel(self) -> Panel:
+        """Generate the models panel for multi-model mode."""
+        if self._num_models == 0:
+            content = Text("Single model mode", style=self.theme['dim'])
+        else:
+            content = Text()
+            
+            # Header with current model prominently displayed
+            content.append(f"Active: ", style=self.theme['dim'])
+            if self._current_model_idx < len(self._model_names):
+                current_name = self._model_names[self._current_model_idx]
+                content.append(f"{current_name}", style=self.theme['accent'])
+            content.append(f" [{self._current_model_idx + 1}/{self._num_models}]\n", style=self.theme['secondary'])
+            content.append("\n")
+            
+            # List all models
+            for i, name in enumerate(self._model_names):
+                is_current = i == self._current_model_idx
+                
+                # Marker for current model
+                if is_current:
+                    content.append("► ", style=self.theme['accent'])
+                else:
+                    content.append("  ", style=self.theme['dim'])
+                
+                # Model index
+                content.append(f"[{i + 1}] ", style=self.theme['dim'])
+                
+                # Model name
+                display_name = name[:20] if len(name) > 20 else name
+                if is_current:
+                    content.append(display_name, style=self.theme['accent'])
+                else:
+                    content.append(display_name, style=self.theme['secondary'])
+                
+                # Show obs dim if available
+                if i < len(self._model_obs_dims) and self._model_obs_dims[i]:
+                    obs_dim = self._model_obs_dims[i]
+                    content.append(f" (obs={obs_dim})", style=self.theme['dim'])
+                
+                content.append("\n")
+            
+            # Key hints
+            content.append("\n")
+            content.append("Keys: ,=prev  .=next  /=info", style=self.theme['dim'])
+        
+        title = Text()
+        title.append("🤖 MODELS", style=self.theme['title'])
+        
+        return Panel(
+            content,
+            title=title,
+            border_style=self.theme['accent'] if self._num_models > 1 else self.theme['border'],
+            box=box.ROUNDED
+        )
+    
     def _generate_observation_panel(self) -> Panel:
         """Generate the observation components panel."""
         if not self._observation_components:
@@ -1658,8 +1760,15 @@ class RLDashboard:
                 
                 # Format values (show all for commands, truncate others)
                 if is_command:
-                    # Show all command values with more detail
-                    if len(data) <= 5:
+                    # Show command values with active indicator for one-hot
+                    if self._onehot_mode and len(data) > 0:
+                        # Find active index and show it
+                        active_idx = int(np.argmax(data))
+                        active_name = self._command_names[active_idx] if active_idx < len(self._command_names) else f"cmd_{active_idx}"
+                        val_str = f"→{active_name} ["
+                        val_str += " ".join(f"{v:.0f}" for v in data)
+                        val_str += "]"
+                    elif len(data) <= 5:
                         val_str = " ".join(f"{v:+.2f}" for v in data)
                     else:
                         val_str = " ".join(f"{v:+.2f}" for v in data[:4]) + f".. [{len(data)}]"
