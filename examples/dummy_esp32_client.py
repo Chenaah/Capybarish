@@ -58,6 +58,7 @@ from capybarish.generated import (
     MotorData,
     IMUData,
     ErrorData,
+    UWBDistances,
 )
 
 
@@ -290,12 +291,14 @@ class DummyESP32Client:
             voltage=24.0,  # Simulated voltage
             current=abs(motor_state.torque) * 0.1,  # Simulated current
             temperature=45,  # Simulated temperature
-            error0=2 if motor_state.enabled else 0,  # Mode: 2 = running
-            error1=0,
+            motor_error=0,  # Motor error flags
+            motor_mode=2 if motor_state.enabled else 0,  # Mode: 0=Off, 1=Cal, 2=On
+            driver_error=0,  # Driver chip error
         )
         
         imu_data = IMUData()  # Default zeros
         error_data = ErrorData(reset_reason0=0, reset_reason1=0)
+        uwb_data = UWBDistances()  # Default zeros
         
         # Create SensorData message
         msg = SensorData(
@@ -309,6 +312,7 @@ class DummyESP32Client:
             imu=imu_data,
             error=error_data,
             goal_distance=0.233,  # Simulated goal distance
+            uwb=uwb_data,
         )
         
         # Send to server

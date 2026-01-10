@@ -31,6 +31,7 @@ from .motor_control_messages import (
     IMUOmega,
     IMUAcceleration,
     ErrorData,
+    UWBDistances,
     MESSAGE_TYPES,
     get_message_type,
 )
@@ -45,6 +46,7 @@ __all__ = [
     "IMUOmega",
     "IMUAcceleration",
     "ErrorData",
+    "UWBDistances",
     "MESSAGE_TYPES",
     "get_message_type",
 ]

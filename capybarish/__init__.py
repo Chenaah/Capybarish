@@ -55,6 +55,13 @@ from .dashboard import (
     create_dashboard,
 )
 
+# Error decoder interface (for custom motor error decoding)
+from .error_decoder import (
+    ErrorDecoder,
+    BaseErrorDecoder,
+    DefaultErrorDecoder,
+)
+
 # Code generation module
 from . import codegen
 
@@ -118,6 +125,10 @@ __all__ = [
     "DeviceStatus",
     "ColumnConfig",
     "create_dashboard",
+    # Error Decoder Interface
+    "ErrorDecoder",
+    "BaseErrorDecoder",
+    "DefaultErrorDecoder",
     # Pub/Sub API (ROS2-like)
     "Node",
     "Publisher",

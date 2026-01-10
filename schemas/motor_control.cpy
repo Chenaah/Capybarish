@@ -69,13 +69,21 @@ message MotorData:
     float32 voltage          # Motor voltage (V)
     float32 current          # Motor current (A)
     int32 temperature        # Temperature (°C)
-    int32 error0             # Error code 0 (mode & error)
-    int32 error1             # Error code 1
+    int32 motor_error        # Motor error flags (6 bits: undervoltage, overcurrent, etc.)
+    int32 motor_mode         # Motor mode (0=Reset/Off, 1=Calibration, 2=Active/On)
+    int32 driver_error       # Driver chip error/fault state (packed bits)
 
 # System error data
 message ErrorData:
     int32 reset_reason0      # CPU0 reset reason
     int32 reset_reason1      # CPU1 reset reason
+
+# UWB distance measurements (4 anchors)
+message UWBDistances:
+    float32 d0               # Distance to anchor 0 (meters)
+    float32 d1               # Distance to anchor 1 (meters)
+    float32 d2               # Distance to anchor 2 (meters)
+    float32 d3               # Distance to anchor 3 (meters)
 
 # Complete sensor data from robot module
 message SensorData:
@@ -89,3 +97,4 @@ message SensorData:
     IMUData imu              # IMU sensor data
     ErrorData error          # Error/reset data
     float32 goal_distance    # Distance to goal (meters)
+    UWBDistances uwb         # UWB distance measurements

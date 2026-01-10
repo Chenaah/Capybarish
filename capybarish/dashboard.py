@@ -61,6 +61,11 @@ from rich.text import Text
 from rich.layout import Layout
 from rich.style import Style
 
+# Import error decoder (with lazy import to avoid circular deps)
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .error_decoder import ErrorDecoder
+
 
 def _force_restore_terminal() -> None:
     """Force restore terminal to normal state.
@@ -157,6 +162,11 @@ class DeviceInfo:
     mode: str = "unknown"
     error: str = ""
     distance: float = -1.0  # Goal distance (-1 = not available)
+    
+    # Motor status (new fields)
+    motor_error: int = 0      # Motor error flags (6 bits)
+    motor_mode: int = 0       # Motor mode (0=Reset/Off, 1=Calibration, 2=Active/On)
+    driver_error: int = 0     # Driver chip error/fault state
     
     # Custom data fields
     custom_data: Dict[str, Any] = field(default_factory=dict)
@@ -676,6 +686,9 @@ class MotorDashboard(RichDashboard):
         switch: bool = False,
         error: str = "",
         distance: float = -1.0,
+        motor_error: int = 0,
+        motor_mode: int = 0,
+        driver_error: int = 0,
         **kwargs
     ) -> None:
         """Update motor-specific data for a device.
@@ -691,6 +704,9 @@ class MotorDashboard(RichDashboard):
             switch: Switch state
             error: Error message if any
             distance: Goal distance in meters (-1 = not available)
+            motor_error: Motor error flags (6 bits)
+            motor_mode: Motor mode (0=Reset/Off, 1=Calibration, 2=Active/On)
+            driver_error: Driver chip error/fault state
             **kwargs: Additional custom data
         """
         self.update_device(
@@ -704,6 +720,9 @@ class MotorDashboard(RichDashboard):
             switch=switch,
             error=error,
             distance=distance,
+            motor_error=motor_error,
+            motor_mode=motor_mode,
+            driver_error=driver_error,
             **kwargs
         )
 
@@ -794,11 +813,26 @@ class RLDashboard:
         },
     }
     
-    def __init__(self, config: Optional[RLDashboardConfig] = None):
-        """Initialize the RL dashboard."""
+    def __init__(self, config: Optional[RLDashboardConfig] = None, error_decoder: Optional["ErrorDecoder"] = None):
+        """Initialize the RL dashboard.
+        
+        Args:
+            config: Dashboard configuration. Uses defaults if None.
+            error_decoder: Optional error decoder for motor/driver errors.
+                          If None, uses default decoder that shows hex codes.
+                          Use `capybarish.devices.CybergearErrorDecoder()` for
+                          Cybergear motors, or implement your own.
+        """
         self.config = config or RLDashboardConfig()
         self.console = Console()
         self.theme = self.THEMES.get(self.config.theme, self.THEMES["cyber"])
+        
+        # Error decoder for motor/driver errors
+        if error_decoder is None:
+            from .error_decoder import default_decoder
+            self._error_decoder = default_decoder
+        else:
+            self._error_decoder = error_decoder
         
         # Motor/device data
         self._devices: Dict[str, DeviceInfo] = {}
@@ -833,6 +867,7 @@ class RLDashboard:
         self._expected_modules: List[int] = []
         self._connected_modules: set = set()
         self._waiting_for_modules: bool = False
+        self._env_ready: bool = False  # Environment ready status
         
         # Command tracking for RL
         self._commands: Optional[np.ndarray] = None
@@ -850,6 +885,20 @@ class RLDashboard:
         # Log/message buffer for debug output
         self._log_messages: List[Tuple[float, str, str]] = []  # (timestamp, level, message)
         self._max_log_lines = config.max_log_lines if config else 8
+        
+        # Training progress tracking (for RL training on real robot)
+        self._training_enabled: bool = False
+        self._training_timesteps: int = 0
+        self._training_total_timesteps: int = 0
+        self._training_episodes: int = 0
+        self._training_avg_reward: float = 0.0
+        self._training_last_reward: float = 0.0
+        self._training_recent_rewards: List[float] = []
+        
+        # Custom gauge/indicator panels (general purpose)
+        # Each gauge is a dict with: value, min_val, max_val, center_val, unit, title,
+        # left_label, right_label, direction_threshold, history, ready, extra_info
+        self._gauges: Dict[str, Dict[str, Any]] = {}
         
         # Display state
         self._live: Optional[Live] = None
@@ -1020,9 +1069,11 @@ class RLDashboard:
         header.append(self.config.title, style=self.theme['title'])
         header.append(" │ ", style=self.theme['dim'])
         if self._motor_enabled:
-            header.append("● ON", style=self.theme['accent'])
+            header.append("● ", style=self.theme['accent'])
+            header.append("ON", style=self.theme['accent'])
         else:
-            header.append("○ OFF", style=self.theme['error'])
+            header.append("○ ", style=self.theme['error'])
+            header.append("OFF", style=self.theme['error'])
         header.append(f" │ Dev:{active_count}/{device_count}", style=self.theme['dim'])
         header.append(f" │ T:{runtime:.0f}s", style=self.theme['dim'])
         header.append(f" │ Ep:{self._episode_count} St:{self._step_count}", style=self.theme['secondary'])
@@ -1033,9 +1084,20 @@ class RLDashboard:
             total = len(self._expected_modules)
             header.append(f" │ ", style=self.theme['dim'])
             if connected < total:
-                header.append(f"⏳{connected}/{total}", style=self.theme['warning'])
+                header.append("⏳ ", style=self.theme['warning'])
+                header.append(f"{connected}/{total}", style=self.theme['warning'])
             else:
-                header.append(f"✓{connected}/{total}", style=self.theme['accent'])
+                header.append("✓ ", style=self.theme['accent'])
+                header.append(f"{connected}/{total}", style=self.theme['accent'])
+        
+        # Show env ready status in compact mode
+        header.append(f" │ ", style=self.theme['dim'])
+        if self._env_ready:
+            header.append("✓ ", style=self.theme['accent'])
+            header.append("Rdy", style=self.theme['accent'])
+        else:
+            header.append("⏳ ", style=self.theme['warning'])
+            header.append("Wait", style=self.theme['warning'])
         
         # Show model info in multi-model mode
         if self._num_models > 1:
@@ -1047,13 +1109,23 @@ class RLDashboard:
             header.append(f"[{self._current_model_idx + 1}/{self._num_models}]", style=self.theme['secondary'])
             header.append(f" {display_name}", style=self.theme['accent'])
         
-        # Motor status line
+        # Motor status line with mode indicators
         motor_line = Text()
         if self._devices:
+            mode_chars = {0: "○", 1: "◐", 2: "●"}  # OFF, CAL, ON
             for addr, dev in list(self._devices.items())[:4]:  # Show max 4 motors
                 is_active = (time.time() - dev.last_seen) < self.config.timeout_sec
-                style = self.theme['accent'] if is_active else self.theme['dim']
+                mode_char = mode_chars.get(dev.motor_mode, "?")
+                if dev.motor_mode == 2:
+                    mode_style = self.theme['accent']
+                elif dev.motor_mode == 1:
+                    mode_style = self.theme['warning']
+                else:
+                    mode_style = self.theme['error']
+                motor_line.append(mode_char, style=mode_style if is_active else self.theme['dim'])
+                motor_line.append(" ", style=self.theme['dim'])  # Add space after mode char
                 motor_line.append(f"{dev.name}:", style=self.theme['dim'])
+                style = self.theme['accent'] if is_active else self.theme['dim']
                 motor_line.append(f"{dev.position:+.2f} ", style=style)
         else:
             motor_line.append("Waiting for motors...", style=self.theme['dim'])
@@ -1094,9 +1166,75 @@ class RLDashboard:
         reward_line.append(f"Σ:{self._episode_reward:+.2f} ", style=self.theme['secondary'])
         reward_line.append(f"dt:{self._loop_dt*1000:.1f}ms", style=self.theme['dim'])
         
-        # Recent log messages (last 3)
+        # Gauge lines (if any gauges defined)
+        gauge_line = Text()
+        if self._gauges:
+            for i, (name, gauge) in enumerate(list(self._gauges.items())[:2]):  # Max 2 in compact
+                if i > 0:
+                    gauge_line.append(" │ ", style=self.theme['dim'])
+                
+                value = gauge['value']
+                center_val = gauge['center_val']
+                min_val = gauge['min_val']
+                max_val = gauge['max_val']
+                threshold = gauge['direction_threshold']
+                unit = gauge['unit']
+                
+                # Title emoji if present
+                title = gauge['title']
+                if title and len(title) > 0 and ord(title[0]) > 127:
+                    gauge_line.append(f"{title[0]} ", style=self.theme['accent'])
+                
+                if not gauge['ready']:
+                    gauge_line.append("...", style=self.theme['dim'])
+                else:
+                    # Mini gauge bar
+                    bar_width = 12
+                    range_val = max_val - min_val
+                    if range_val > 0:
+                        normalized = (value - min_val) / range_val
+                        pos = int(np.clip(normalized, 0, 1) * (bar_width - 1))
+                        center_normalized = (center_val - min_val) / range_val
+                        center_pos = int(np.clip(center_normalized, 0, 1) * (bar_width - 1))
+                    else:
+                        pos = bar_width // 2
+                        center_pos = bar_width // 2
+                    
+                    gauge_line.append("[", style=self.theme['dim'])
+                    for j in range(bar_width):
+                        if j == center_pos:
+                            gauge_line.append("│", style=self.theme['dim'])
+                        elif j == pos:
+                            gauge_line.append("●", style=self.theme['accent'])
+                        elif (j < center_pos and j >= pos and value < center_val) or \
+                             (j > center_pos and j <= pos and value > center_val):
+                            gauge_line.append("─", style=self.theme['secondary'])
+                        else:
+                            gauge_line.append("·", style=self.theme['dim'])
+                    gauge_line.append("] ", style=self.theme['dim'])
+                    
+                    # Direction
+                    if value > center_val + threshold:
+                        direction = gauge['right_direction'].split()[0] if ' ' in gauge['right_direction'] else gauge['right_direction']
+                        dir_style = self.theme['warning']
+                    elif value < center_val - threshold:
+                        direction = gauge['left_direction'].split()[0] if ' ' in gauge['left_direction'] else gauge['left_direction']
+                        dir_style = self.theme['warning']
+                    else:
+                        direction = gauge['center_direction'].split()[0] if ' ' in gauge['center_direction'] else gauge['center_direction']
+                        dir_style = self.theme['accent']
+                    
+                    gauge_line.append(f"{value:+.1f}{unit} ", style=self.theme['accent'])
+                    gauge_line.append(direction, style=dir_style)
+                    
+                    # First extra info
+                    for key, val in list(gauge['extra_info'].items())[:1]:
+                        gauge_line.append(f" {val}", style=self.theme['dim'])
+        
+        # Recent log messages (last 2-3 depending on training mode)
         log_line = Text()
-        recent_logs = self._log_messages[-3:]
+        max_logs = 2 if self._training_enabled else 3
+        recent_logs = self._log_messages[-max_logs:]
         if recent_logs:
             for _, level, msg in recent_logs:
                 if level == "error":
@@ -1107,12 +1245,48 @@ class RLDashboard:
                     log_line.append("✓ ", style=self.theme['accent'])
                 else:
                     log_line.append("• ", style=self.theme['dim'])
-                log_line.append(msg[:30] + " ", style=self.theme['secondary'])
+                log_line.append(msg[:28] + " ", style=self.theme['secondary'])
+        
+        # Training progress line (if enabled)
+        training_line = Text()
+        if self._training_enabled:
+            # Progress percentage and bar
+            progress = self._training_timesteps / max(self._training_total_timesteps, 1)
+            progress_pct = progress * 100
+            bar_width = 20
+            filled = int(progress * bar_width)
+            
+            training_line.append("🎓 ", style=self.theme['accent'])
+            training_line.append(f"{progress_pct:5.1f}% ", style=self.theme['accent'])
+            
+            # Progress bar
+            training_line.append("[", style=self.theme['dim'])
+            training_line.append("█" * filled, style=self.theme['accent'])
+            training_line.append("░" * (bar_width - filled), style=self.theme['dim'])
+            training_line.append("] ", style=self.theme['dim'])
+            
+            # Stats
+            training_line.append(f"{self._training_timesteps:,}/{self._training_total_timesteps:,}", style=self.theme['secondary'])
+            training_line.append(f" │ Ep:{self._training_episodes}", style=self.theme['dim'])
+            training_line.append(f" │ R̄:{self._training_avg_reward:+.2f}", style=self.theme['accent'])
+            if self._training_last_reward != 0:
+                training_line.append(f" (last:{self._training_last_reward:+.1f})", style=self.theme['dim'])
         
         # Combine all into a compact panel
         content = Text()
         content.append_text(header)
         content.append("\n")
+        
+        # Add training progress line prominently if enabled
+        if self._training_enabled:
+            content.append_text(training_line)
+            content.append("\n")
+        
+        # Add gauge line if any gauges defined
+        if self._gauges:
+            content.append_text(gauge_line)
+            content.append("\n")
+        
         content.append_text(motor_line)
         content.append("\n")
         content.append_text(action_line)
@@ -1123,11 +1297,18 @@ class RLDashboard:
         content.append(" │ ", style=self.theme['dim'])
         content.append_text(log_line)
         
+        # Adjust height based on active features
+        panel_height = 6
+        if self._training_enabled:
+            panel_height += 1
+        if self._gauges:
+            panel_height += 1
+        
         return Panel(
             content,
-            border_style=self.theme['border'],
+            border_style=self.theme['accent'] if self._training_enabled else self.theme['border'],
             box=box.ROUNDED,
-            height=6,  # Fixed height for compact mode
+            height=panel_height,
         )
     
     # =========================================================================
@@ -1147,6 +1328,9 @@ class RLDashboard:
         switch: bool = False,
         error: str = "",
         distance: float = -1.0,
+        motor_error: int = 0,
+        motor_mode: int = 0,
+        driver_error: int = 0,
         **kwargs
     ) -> None:
         """Update motor data."""
@@ -1165,6 +1349,9 @@ class RLDashboard:
             device.custom_data["switch"] = switch
             device.error = error
             device.distance = distance
+            device.motor_error = motor_error
+            device.motor_mode = motor_mode
+            device.driver_error = driver_error
             device.last_seen = time.time()
             device.recv_count += 1
     
@@ -1297,6 +1484,235 @@ class RLDashboard:
         """Set custom status field."""
         self._custom_status[key] = value
     
+    def set_env_ready(self, ready: bool) -> None:
+        """Set the environment ready status."""
+        self._env_ready = ready
+    
+    # =========================================================================
+    # Training Progress Tracking
+    # =========================================================================
+    
+    def enable_training_progress(self, total_timesteps: int) -> None:
+        """Enable training progress display.
+        
+        Args:
+            total_timesteps: Total timesteps for training
+        """
+        self._training_enabled = True
+        self._training_total_timesteps = total_timesteps
+        self._training_timesteps = 0
+        self._training_episodes = 0
+        self._training_avg_reward = 0.0
+        self._training_recent_rewards = []
+        self.log_info(f"Training started: {total_timesteps:,} timesteps")
+    
+    def update_training_progress(
+        self,
+        timesteps: int,
+        episodes: int = None,
+        episode_reward: float = None,
+        avg_reward: float = None,
+    ) -> None:
+        """Update training progress display.
+        
+        Args:
+            timesteps: Current total timesteps
+            episodes: Current episode count (optional)
+            episode_reward: Reward from last completed episode (optional)
+            avg_reward: Moving average reward (optional)
+        """
+        self._training_timesteps = timesteps
+        
+        if episodes is not None:
+            self._training_episodes = episodes
+        
+        if episode_reward is not None:
+            self._training_last_reward = episode_reward
+            self._training_recent_rewards.append(episode_reward)
+            # Keep last 20 for averaging
+            if len(self._training_recent_rewards) > 20:
+                self._training_recent_rewards.pop(0)
+        
+        if avg_reward is not None:
+            self._training_avg_reward = avg_reward
+        elif self._training_recent_rewards:
+            self._training_avg_reward = np.mean(self._training_recent_rewards)
+    
+    def disable_training_progress(self) -> None:
+        """Disable training progress display."""
+        self._training_enabled = False
+        if self._training_recent_rewards:
+            final_avg = np.mean(self._training_recent_rewards)
+            self.log_success(f"Training done: {self._training_episodes} eps, avg={final_avg:.2f}")
+    
+    # =========================================================================
+    # Custom Gauge/Indicator Panel (General Purpose)
+    # =========================================================================
+    
+    def add_gauge(
+        self,
+        name: str,
+        title: str = None,
+        min_val: float = -90.0,
+        max_val: float = 90.0,
+        center_val: float = 0.0,
+        unit: str = "°",
+        left_label: str = "MIN",
+        right_label: str = "MAX",
+        direction_threshold: float = 5.0,
+        left_direction: str = "←",
+        right_direction: str = "→",
+        center_direction: str = "↑",
+        track_history: bool = True,
+    ) -> None:
+        """Add a custom gauge/indicator panel.
+        
+        This creates a general-purpose visual gauge that shows:
+        - A large numeric value display
+        - A visual bar showing the value's position in range
+        - Optional direction indicators
+        - Optional history sparkline
+        - Optional extra info (like distance)
+        
+        Args:
+            name: Unique identifier for this gauge
+            title: Panel title (default: name)
+            min_val: Minimum value for the gauge range
+            max_val: Maximum value for the gauge range
+            center_val: Center value for bipolar display (where the bar center is)
+            unit: Unit string (e.g., "°", "m", "%")
+            left_label: Label for left side of bar
+            right_label: Label for right side of bar
+            direction_threshold: Threshold from center to show direction change
+            left_direction: Direction indicator when value < center - threshold
+            right_direction: Direction indicator when value > center + threshold
+            center_direction: Direction indicator when value is near center
+            track_history: Whether to track and display history sparkline
+            
+        Example:
+            # Bearing gauge (bipolar, centered at 0)
+            dashboard.add_gauge(
+                "bearing",
+                title="🧭 BEARING",
+                min_val=-90, max_val=90, center_val=0,
+                unit="°",
+                left_label="RIGHT", right_label="LEFT",
+                left_direction="→", right_direction="←", center_direction="↑",
+            )
+            
+            # Speed gauge (unipolar)
+            dashboard.add_gauge(
+                "speed",
+                title="🚀 SPEED",
+                min_val=0, max_val=10, center_val=0,
+                unit="m/s",
+                left_label="STOP", right_label="MAX",
+            )
+        """
+        self._gauges[name] = {
+            'title': title or name,
+            'value': center_val,
+            'min_val': min_val,
+            'max_val': max_val,
+            'center_val': center_val,
+            'unit': unit,
+            'left_label': left_label,
+            'right_label': right_label,
+            'direction_threshold': direction_threshold,
+            'left_direction': left_direction,
+            'right_direction': right_direction,
+            'center_direction': center_direction,
+            'track_history': track_history,
+            'history': [],
+            'ready': False,
+            'extra_info': {},
+        }
+    
+    def update_gauge(
+        self,
+        name: str,
+        value: float,
+        ready: bool = True,
+        extra_info: Dict[str, Any] = None,
+    ) -> None:
+        """Update a gauge value.
+        
+        Args:
+            name: Gauge identifier
+            value: New value to display
+            ready: Whether the gauge is ready/valid (False shows "collecting..." state)
+            extra_info: Optional dict of extra info to display (e.g., {"distance": 3.5})
+        """
+        if name not in self._gauges:
+            # Auto-create with defaults if not exists
+            self.add_gauge(name)
+        
+        gauge = self._gauges[name]
+        gauge['value'] = value
+        gauge['ready'] = ready
+        
+        if extra_info:
+            gauge['extra_info'].update(extra_info)
+        
+        # Track history
+        if gauge['track_history']:
+            gauge['history'].append(value)
+            if len(gauge['history']) > 100:
+                gauge['history'] = gauge['history'][-50:]
+    
+    def remove_gauge(self, name: str) -> None:
+        """Remove a gauge."""
+        self._gauges.pop(name, None)
+    
+    def get_gauge_value(self, name: str) -> Optional[float]:
+        """Get the current value of a gauge."""
+        if name in self._gauges:
+            return self._gauges[name]['value']
+        return None
+    
+    def has_gauges(self) -> bool:
+        """Check if any gauges are defined."""
+        return len(self._gauges) > 0
+    
+    # Convenience method for bearing (backward compatibility)
+    def update_bearing(
+        self,
+        bearing_rad: float,
+        distance: float = -1.0,
+        history_filled: bool = True,
+    ) -> None:
+        """Update bearing estimation display (convenience wrapper for gauge).
+        
+        Args:
+            bearing_rad: Bearing in radians (positive = left, negative = right)
+            distance: Current distance to target (meters)
+            history_filled: Whether enough history has been collected
+        """
+        # Auto-create bearing gauge if not exists
+        if "bearing" not in self._gauges:
+            self.add_gauge(
+                "bearing",
+                title="🧭 BEARING",
+                min_val=-90, max_val=90, center_val=0,
+                unit="°",
+                left_label="RIGHT", right_label="LEFT",
+                direction_threshold=5.0,
+                left_direction="→ RIGHT",
+                right_direction="← LEFT",
+                center_direction="↑ FWD",
+            )
+        
+        bearing_deg = np.degrees(bearing_rad)
+        extra = {}
+        if distance > 0:
+            extra['distance'] = f"{distance:.2f}m"
+        
+        self.update_gauge("bearing", bearing_deg, ready=history_filled, extra_info=extra)
+    
+    def disable_bearing(self) -> None:
+        """Disable bearing gauge (convenience wrapper)."""
+        self.remove_gauge("bearing")
+    
     # =========================================================================
     # Logging and Module Tracking
     # =========================================================================
@@ -1376,9 +1792,10 @@ class RLDashboard:
         """Generate the full multi-panel display."""
         layout = Layout()
         
-        # Create vertical layout
+        # Create vertical layout (taller header when training)
+        header_size = 5 if self._training_enabled else 3
         layout.split_column(
-            Layout(name="header", size=3),
+            Layout(name="header", size=header_size),
             Layout(name="main", ratio=1),
             Layout(name="footer", size=3),
         )
@@ -1406,11 +1823,19 @@ class RLDashboard:
                 Layout(name="log", ratio=1),
             )
         
-        # Right side: Observations + Actions/System
-        layout["right"].split_column(
-            Layout(name="observations", ratio=2),
-            Layout(name="bottom_right", ratio=1),
-        )
+        # Right side: Observations + Actions/System (+ Gauges if any)
+        if self._gauges:
+            # Include gauge panel(s)
+            layout["right"].split_column(
+                Layout(name="observations", ratio=2),
+                Layout(name="gauges", ratio=1),
+                Layout(name="bottom_right", ratio=1),
+            )
+        else:
+            layout["right"].split_column(
+                Layout(name="observations", ratio=2),
+                Layout(name="bottom_right", ratio=1),
+            )
         
         # Bottom right: Actions + System side by side
         layout["bottom_right"].split_row(
@@ -1426,6 +1851,8 @@ class RLDashboard:
         layout["commands"].update(self._generate_command_panel())
         layout["log"].update(self._generate_log_panel())
         layout["observations"].update(self._generate_observation_panel())
+        if self._gauges:
+            layout["gauges"].update(self._generate_gauges_panel())
         layout["actions"].update(self._generate_action_panel())
         layout["system"].update(self._generate_system_panel())
         layout["footer"].update(self._generate_footer())
@@ -1447,9 +1874,11 @@ class RLDashboard:
         header.append(self.config.title, style=self.theme['title'])
         header.append("  │  Motors: ", style=self.theme['primary'])
         if self._motor_enabled:
-            header.append("● ON", style=self.theme['accent'])
+            header.append("● ", style=self.theme['accent'])
+            header.append("ON", style=self.theme['accent'])
         else:
-            header.append("○ OFF", style=self.theme['error'])
+            header.append("○ ", style=self.theme['error'])
+            header.append("OFF", style=self.theme['error'])
         header.append("  │  Devices: ", style=self.theme['primary'])
         header.append(f"{active_count}", style=self.theme['accent'])
         header.append(f"/{device_count}", style=self.theme['dim'])
@@ -1467,24 +1896,93 @@ class RLDashboard:
             header.append(f"  │  ", style=self.theme['dim'])
             if connected < total:
                 # Still waiting - show progress
-                header.append(f"⏳ {connected}/{total}", style=self.theme['warning'])
+                header.append("⏳ ", style=self.theme['warning'])
+                header.append(f"{connected}/{total}", style=self.theme['warning'])
             else:
                 # All connected
-                header.append(f"✓ {connected}/{total}", style=self.theme['accent'])
+                header.append("✓ ", style=self.theme['accent'])
+                header.append(f"{connected}/{total}", style=self.theme['accent'])
         
-        return Panel(header, style=self.theme['border'], box=box.DOUBLE)
+        # Show environment ready status
+        header.append(f"  │  ", style=self.theme['dim'])
+        if self._env_ready:
+            header.append("✓ ", style=self.theme['accent'])
+            header.append("Ready", style=self.theme['accent'])
+        else:
+            header.append("⏳ ", style=self.theme['warning'])
+            header.append("Not Ready", style=self.theme['warning'])
+        
+        # Show gauges summary in header if any
+        for gauge_name, gauge in list(self._gauges.items())[:2]:  # Show max 2 in header
+            header.append(f"  │  ", style=self.theme['dim'])
+            # Extract emoji from title if present
+            title = gauge['title']
+            if title and len(title) > 0 and ord(title[0]) > 127:
+                header.append(f"{title[0]} ", style=self.theme['accent'])
+            
+            if gauge['ready']:
+                value = gauge['value']
+                center = gauge['center_val']
+                threshold = gauge['direction_threshold']
+                
+                if value > center + threshold:
+                    direction = gauge['right_direction'].split()[0] if ' ' in gauge['right_direction'] else gauge['right_direction']
+                    dir_style = self.theme['warning']
+                elif value < center - threshold:
+                    direction = gauge['left_direction'].split()[0] if ' ' in gauge['left_direction'] else gauge['left_direction']
+                    dir_style = self.theme['warning']
+                else:
+                    direction = gauge['center_direction'].split()[0] if ' ' in gauge['center_direction'] else gauge['center_direction']
+                    dir_style = self.theme['accent']
+                
+                header.append(f"{value:+.0f}{gauge['unit']} ", style=self.theme['accent'])
+                header.append(direction, style=dir_style)
+            else:
+                header.append("...", style=self.theme['dim'])
+        
+        # Add training progress on second line if enabled
+        if self._training_enabled:
+            header.append("\n")
+            
+            # Progress percentage and bar
+            progress = self._training_timesteps / max(self._training_total_timesteps, 1)
+            progress_pct = progress * 100
+            bar_width = 30
+            filled = int(progress * bar_width)
+            
+            header.append("  🎓 TRAINING ", style=self.theme['title'])
+            header.append(f"{progress_pct:5.1f}% ", style=self.theme['accent'])
+            
+            # Progress bar
+            header.append("[", style=self.theme['dim'])
+            header.append("█" * filled, style=self.theme['accent'])
+            header.append("░" * (bar_width - filled), style=self.theme['dim'])
+            header.append("] ", style=self.theme['dim'])
+            
+            # Stats
+            header.append(f"{self._training_timesteps:,}/{self._training_total_timesteps:,}", style=self.theme['secondary'])
+            header.append(f"  │  Episodes: ", style=self.theme['dim'])
+            header.append(f"{self._training_episodes}", style=self.theme['accent'])
+            header.append(f"  │  Avg Reward: ", style=self.theme['dim'])
+            header.append(f"{self._training_avg_reward:+.2f}", style=self.theme['accent'])
+            if self._training_last_reward != 0:
+                header.append(f" (last: {self._training_last_reward:+.1f})", style=self.theme['secondary'])
+        
+        # Use larger height when training is enabled
+        border_style = self.theme['accent'] if self._training_enabled else self.theme['border']
+        return Panel(header, style=border_style, box=box.DOUBLE)
     
     def _generate_motor_panel(self) -> Panel:
-        """Generate the motor status panel."""
+        """Generate the motor status panel with motor error/mode/driver error info."""
         table = Table(show_header=True, expand=True, box=box.SIMPLE_HEAD)
         
-        table.add_column("Module", style=self.theme['primary'], width=12)
-        table.add_column("Pos", justify="right", style=self.theme['secondary'])
-        table.add_column("Vel", justify="right", style=self.theme['secondary'])
-        table.add_column("τ", justify="right", style=self.theme['secondary'])
-        table.add_column("V", justify="right", style=self.theme['dim'])
-        table.add_column("Dist", justify="right", style=self.theme['accent'])
-        table.add_column("Status", justify="center")
+        table.add_column("Module", style=self.theme['primary'], width=14)
+        table.add_column("Pos", justify="right", style=self.theme['secondary'], width=7)
+        table.add_column("Vel", justify="right", style=self.theme['secondary'], width=6)
+        table.add_column("V", justify="right", style=self.theme['dim'], width=4)
+        table.add_column("Mode", justify="center", width=6)  # Motor mode indicator
+        table.add_column("Error", justify="left", width=14)   # Motor + Driver errors (decoded)
+        table.add_column("Status", justify="center", width=8)
         
         devices = dict(self._devices)
         if not devices:
@@ -1495,15 +1993,36 @@ class RLDashboard:
                 is_active = (now - dev.last_seen) < self.config.timeout_sec
                 
                 # Format values
-                pos_str = f"{dev.position:+.3f}"
-                vel_str = f"{dev.velocity:+.2f}"
-                torque_str = f"{dev.torque:+.2f}"
-                volt_str = f"{dev.voltage:.1f}"
-                dist_str = f"{dev.distance:.2f}" if dev.distance >= 0 else "—"
+                pos_str = f"{dev.position:+.2f}"
+                vel_str = f"{dev.velocity:+.1f}"
+                volt_str = f"{dev.voltage:.0f}"
                 
-                # Status with visual indicator
-                if dev.error:
-                    status = f"[{self.theme['error']}]⚠ {dev.error[:10]}[/]"
+                # Motor mode indicator (0=Reset/Off, 1=Calibration, 2=Active/On)
+                mode_names = {0: "OFF", 1: "CAL", 2: "ON"}
+                mode_name = mode_names.get(dev.motor_mode, "?")
+                if dev.motor_mode == 2:
+                    mode_str = f"[{self.theme['accent']}]● {mode_name}[/]"
+                elif dev.motor_mode == 1:
+                    mode_str = f"[{self.theme['warning']}]◐ {mode_name}[/]"
+                else:
+                    mode_str = f"[{self.theme['error']}]○ {mode_name}[/]"
+                
+                # Decode and display motor_error + driver_error using error decoder
+                err_parts = []
+                motor_err_str = self._error_decoder.decode_motor_error(dev.motor_error)
+                driver_err_str = self._error_decoder.decode_driver_error(dev.driver_error)
+                if motor_err_str:
+                    err_parts.append(motor_err_str)
+                if driver_err_str:
+                    err_parts.append(driver_err_str)
+                if err_parts:
+                    err_str = f"[{self.theme['error']}]{' '.join(err_parts)}[/]"
+                else:
+                    err_str = f"[{self.theme['accent']}]OK[/]"
+                
+                # Status with visual indicator (based on connection status)
+                if dev.error:  # Reset reason errors
+                    status = f"[{self.theme['error']}]⚠ RST[/]"
                 elif is_active:
                     switch = dev.custom_data.get("switch", False)
                     if switch:
@@ -1519,9 +2038,9 @@ class RLDashboard:
                     Text(dev.name, style=style),
                     Text(pos_str, style=style),
                     Text(vel_str, style=style),
-                    Text(torque_str, style=style),
                     Text(volt_str, style=style),
-                    Text(dist_str, style=style),
+                    mode_str,
+                    err_str,
                     status
                 )
         
@@ -1848,6 +2367,171 @@ class RLDashboard:
             border_style=self.theme['border'],
             box=box.ROUNDED
         )
+    
+    def _generate_gauges_panel(self) -> Panel:
+        """Generate panel for all custom gauges."""
+        from rich.columns import Columns
+        
+        if not self._gauges:
+            content = Text("No gauges configured", style=self.theme['dim'])
+            return Panel(content, title="GAUGES", border_style=self.theme['border'], box=box.ROUNDED)
+        
+        # If single gauge, show detailed view
+        if len(self._gauges) == 1:
+            name, gauge = list(self._gauges.items())[0]
+            return self._generate_single_gauge_panel(name, gauge)
+        
+        # Multiple gauges - show compact view
+        content = Text()
+        for i, (name, gauge) in enumerate(self._gauges.items()):
+            if i > 0:
+                content.append("\n")
+            self._append_gauge_compact(content, name, gauge)
+        
+        title = Text()
+        title.append("📊 GAUGES", style=self.theme['title'])
+        
+        return Panel(
+            content,
+            title=title,
+            border_style=self.theme['border'],
+            box=box.ROUNDED
+        )
+    
+    def _generate_single_gauge_panel(self, name: str, gauge: Dict[str, Any]) -> Panel:
+        """Generate a detailed panel for a single gauge."""
+        content = Text()
+        
+        value = gauge['value']
+        min_val = gauge['min_val']
+        max_val = gauge['max_val']
+        center_val = gauge['center_val']
+        unit = gauge['unit']
+        threshold = gauge['direction_threshold']
+        
+        if not gauge['ready']:
+            # Not ready state
+            content.append(f"Collecting data...\n\n", style=self.theme['warning'])
+            content.append("Waiting for enough samples\n", style=self.theme['dim'])
+            content.append(f"to compute {name}.", style=self.theme['dim'])
+        else:
+            # Direction indicator
+            if value > center_val + threshold:
+                direction = gauge['right_direction']
+                dir_style = self.theme['warning']
+            elif value < center_val - threshold:
+                direction = gauge['left_direction']
+                dir_style = self.theme['warning']
+            else:
+                direction = gauge['center_direction']
+                dir_style = self.theme['accent']
+            
+            # Large value display (prominent)
+            content.append("         ", style=self.theme['dim'])
+            content.append(f"{value:+.1f}{unit}", style=f"bold {self.theme['accent']}")
+            content.append(f"  {direction}\n\n", style=dir_style)
+            
+            # Gauge bar visualization
+            bar_width = 30
+            range_val = max_val - min_val
+            if range_val > 0:
+                # Position on bar (0 to bar_width)
+                normalized = (value - min_val) / range_val
+                pos = int(np.clip(normalized, 0, 1) * (bar_width - 1))
+                
+                # Center position on bar
+                center_normalized = (center_val - min_val) / range_val
+                center_pos = int(np.clip(center_normalized, 0, 1) * (bar_width - 1))
+            else:
+                pos = bar_width // 2
+                center_pos = bar_width // 2
+            
+            # Bar with range markers
+            content.append(f"  {min_val:+.0f}{unit}", style=self.theme['dim'])
+            spacing = bar_width - 12 - len(str(int(max_val))) - len(unit)
+            content.append(" " * max(1, spacing // 2), style=self.theme['dim'])
+            content.append(f"{center_val:.0f}{unit}", style=self.theme['secondary'])
+            content.append(" " * max(1, spacing - spacing // 2), style=self.theme['dim'])
+            content.append(f"{max_val:+.0f}{unit}\n", style=self.theme['dim'])
+            
+            content.append("    ", style=self.theme['dim'])
+            content.append("[", style=self.theme['dim'])
+            for i in range(bar_width):
+                if i == center_pos:
+                    content.append("│", style=self.theme['secondary'])
+                elif i == pos:
+                    content.append("◆", style=self.theme['accent'])
+                elif (i < center_pos and i >= pos and value < center_val) or \
+                     (i > center_pos and i <= pos and value > center_val):
+                    content.append("═", style=self.theme['secondary'])
+                else:
+                    content.append("·", style=self.theme['dim'])
+            content.append("]\n", style=self.theme['dim'])
+            
+            # Labels
+            content.append("    ", style=self.theme['dim'])
+            left_label = gauge['left_label']
+            right_label = gauge['right_label']
+            label_spacing = bar_width - len(left_label) - len(right_label)
+            content.append(left_label, style=self.theme['dim'])
+            content.append(" " * max(1, label_spacing), style=self.theme['dim'])
+            content.append(f"{right_label}\n", style=self.theme['dim'])
+            
+            # Extra info
+            for key, val in gauge['extra_info'].items():
+                content.append(f"    {key}: ", style=self.theme['primary'])
+                content.append(f"{val}\n", style=self.theme['secondary'])
+            
+            # History sparkline
+            if gauge['track_history'] and len(gauge['history']) > 5:
+                sparkline = self._generate_sparkline(gauge['history'][-20:], width=20)
+                content.append("    History: ", style=self.theme['dim'])
+                content.append(sparkline, style=self.theme['secondary'])
+        
+        title = Text()
+        title.append(gauge['title'], style=self.theme['title'])
+        
+        return Panel(
+            content,
+            title=title,
+            border_style=self.theme['accent'] if gauge['ready'] else self.theme['warning'],
+            box=box.ROUNDED
+        )
+    
+    def _append_gauge_compact(self, content: Text, name: str, gauge: Dict[str, Any]) -> None:
+        """Append a compact gauge display to content."""
+        value = gauge['value']
+        center_val = gauge['center_val']
+        threshold = gauge['direction_threshold']
+        unit = gauge['unit']
+        
+        # Title/emoji
+        title = gauge['title']
+        if title and len(title) > 0:
+            content.append(f"{title}: ", style=self.theme['primary'])
+        else:
+            content.append(f"{name}: ", style=self.theme['primary'])
+        
+        if not gauge['ready']:
+            content.append("...", style=self.theme['dim'])
+        else:
+            # Direction
+            if value > center_val + threshold:
+                direction = gauge['right_direction'].split()[0] if ' ' in gauge['right_direction'] else gauge['right_direction']
+                dir_style = self.theme['warning']
+            elif value < center_val - threshold:
+                direction = gauge['left_direction'].split()[0] if ' ' in gauge['left_direction'] else gauge['left_direction']
+                dir_style = self.theme['warning']
+            else:
+                direction = gauge['center_direction'].split()[0] if ' ' in gauge['center_direction'] else gauge['center_direction']
+                dir_style = self.theme['accent']
+            
+            content.append(f"{value:+.1f}{unit} ", style=self.theme['accent'])
+            content.append(direction, style=dir_style)
+            
+            # Extra info inline
+            for key, val in list(gauge['extra_info'].items())[:1]:
+                content.append(f" │ {key}:{val}", style=self.theme['dim'])
     
     def _generate_log_panel(self) -> Panel:
         """Generate the log/messages panel."""

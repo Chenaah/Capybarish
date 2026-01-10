@@ -37,6 +37,7 @@ from capybarish.generated import (
     MotorData,
     IMUData,
     ErrorData,
+    UWBDistances,
 )
 
 # Import NatNet client
@@ -63,7 +64,7 @@ except ImportError:
 
 DEFAULT_OPTITRACK_SERVER = "129.105.73.172"
 DEFAULT_CLIENT_ADDRESS = "0.0.0.0"
-DEFAULT_RIGID_BODY_ID = 3
+DEFAULT_RIGID_BODY_ID = 6
 
 DEFAULT_SERVER_IP = "127.0.0.1"
 DEFAULT_SERVER_PORT = 6666
@@ -215,6 +216,7 @@ class OptiTrackRobotClient:
             imu=IMUData(),
             error=ErrorData(),
             goal_distance=goal_dist,
+            uwb=UWBDistances(),
         )
         
         try:
