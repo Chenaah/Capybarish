@@ -36,6 +36,7 @@ from capybarish.generated import (
     SensorData,
     MotorData,
     IMUData,
+    IMUQuaternion,
     ErrorData,
     UWBDistances,
 )
@@ -201,9 +202,20 @@ class OptiTrackRobotClient:
                     pass  # Silently ignore errors during shutdown
     
     def send_sensor_data(self) -> None:
-        """Send SensorData with goal distance."""
+        """Send SensorData with goal distance and quaternion from OptiTrack."""
         now = time.time()
         goal_dist = self.calculate_goal_distance()
+        
+        # Create IMU data with quaternion from OptiTrack
+        imu_data = IMUData()
+        if self.current_rotation is not None:
+            # OptiTrack rotation is a quaternion (x, y, z, w)
+            imu_data.quaternion = IMUQuaternion(
+                x=float(self.current_rotation[0]),
+                y=float(self.current_rotation[1]),
+                z=float(self.current_rotation[2]),
+                w=float(self.current_rotation[3]),
+            )
         
         msg = SensorData(
             module_id=self.module_id,
@@ -213,7 +225,7 @@ class OptiTrackRobotClient:
             last_rcv_timestamp=self.last_cmd_time,
             info=0,
             motor=MotorData(),
-            imu=IMUData(),
+            imu=imu_data,
             error=ErrorData(),
             goal_distance=goal_dist,
             uwb=UWBDistances(),

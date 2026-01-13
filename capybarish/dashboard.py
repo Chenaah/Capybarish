@@ -1693,7 +1693,7 @@ class RLDashboard:
             self.add_gauge(
                 "bearing",
                 title="🧭 BEARING",
-                min_val=-90, max_val=90, center_val=0,
+                min_val=-180, max_val=180, center_val=0,
                 unit="°",
                 left_label="RIGHT", right_label="LEFT",
                 direction_threshold=5.0,
