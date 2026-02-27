@@ -7,11 +7,13 @@ This script demonstrates how to:
 2. Calculate 2D distance from current position to a goal
 3. Send SensorData messages (with goal_distance) to a server
 4. Display a live dashboard with all tracked rigid bodies
+5. Optionally record tracking data to a file for later analysis
 
 Usage:
     python optitrack_robot_client.py
     python optitrack_robot_client.py --optitrack-ip 129.105.73.172 --rigid-body-id 3
     python optitrack_robot_client.py --goal-x 1.0 --goal-y 2.0
+    python optitrack_robot_client.py --record --record-file tracking_data.npz --record-interval 0.1
 
 Copyright 2025 Chen Yu <chenyu@u.northwestern.edu>
 """
@@ -23,6 +25,7 @@ import socket
 import sys
 import threading
 import time
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -93,6 +96,10 @@ class OptiTrackRobotClient:
         command_port: int = DEFAULT_COMMAND_PORT,
         goal_x: float = 0.0,
         goal_y: float = 0.0,
+        record: bool = False,
+        record_file: Optional[str] = None,
+        record_interval: float = 0.1,
+        save_interval: float = 10.0,
     ):
         self.module_id = module_id
         self.optitrack_server_ip = optitrack_server_ip
@@ -140,6 +147,25 @@ class OptiTrackRobotClient:
         
         # Connection status
         self.optitrack_connected = False
+        
+        # Recording settings
+        self._record = record
+        self._record_file = record_file
+        self._record_interval = record_interval
+        self._save_interval = save_interval
+        self._last_record_time = 0.0
+        self._last_save_time = 0.0
+        
+        # Recording data buffers
+        self._recorded_timestamps: List[float] = []
+        self._recorded_positions_x: List[float] = []
+        self._recorded_positions_y: List[float] = []
+        self._recorded_positions_z: List[float] = []
+        self._recorded_goal_x: List[float] = []
+        self._recorded_goal_y: List[float] = []
+        self._recorded_distances: List[float] = []
+        self._recorded_rotations: List[List[float]] = []  # quaternion [x, y, z, w]
+        self._record_count = 0
     
     def _receive_rigid_body_frame(
         self,
@@ -310,6 +336,7 @@ class OptiTrackRobotClient:
                     loop_start = time.time()
                     
                     self.send_sensor_data()
+                    self._record_data_point()
                     
                     # Update dashboard
                     if time.time() - last_dashboard_update >= dashboard_period:
@@ -333,6 +360,7 @@ class OptiTrackRobotClient:
             while self._running:
                 loop_start = time.time()
                 self.send_sensor_data()
+                self._record_data_point()
                 
                 # Print status every second
                 if time.time() - last_print >= 1.0:
@@ -360,6 +388,9 @@ class OptiTrackRobotClient:
             print("Waiting for tracked rigid body data...")
         
         print(f"TX: {self.send_count} | RX: {self.recv_count}")
+        
+        if self._record:
+            print(f"Recording: {self._record_count} samples (rec: {self._record_interval}s, save: {self._save_interval}s)")
     
     def _generate_dashboard(self) -> Layout:
         """Generate the rich dashboard layout."""
@@ -505,12 +536,134 @@ class OptiTrackRobotClient:
             f"[yellow]Commands RX:[/] {self.recv_count}",
             f"[dim]Robot Server: {self.server_ip}:{self.server_port}[/]",
         ]
+        
+        # Add recording info if enabled
+        if self._record:
+            lines.append("")
+            lines.append(f"[red]● Recording:[/] {self._record_count} samples")
+            lines.append(f"[dim]  Rec interval: {self._record_interval}s | Save every: {self._save_interval}s[/]")
+        
         content = "\n".join(lines)
         return Panel(content, title="[bold]Statistics[/]", border_style="yellow")
     
     def set_goal(self, x: float, y: float) -> None:
         """Set a new 2D goal position."""
         self.goal_position = np.array([x, y])
+    
+    def _record_data_point(self) -> None:
+        """Record current position and goal data if recording is enabled."""
+        if not self._record:
+            return
+        
+        now = time.time()
+        if now - self._last_record_time < self._record_interval:
+            return
+        
+        # Only record if we have valid position data
+        if self.current_position is None:
+            return
+        
+        self._last_record_time = now
+        timestamp = now - self._start_time
+        
+        with self._lock:
+            self._recorded_timestamps.append(timestamp)
+            self._recorded_positions_x.append(float(self.current_position[0]))
+            self._recorded_positions_y.append(float(self.current_position[1]))
+            self._recorded_positions_z.append(float(self.current_position[2]))
+            self._recorded_goal_x.append(float(self.goal_position[0]))
+            self._recorded_goal_y.append(float(self.goal_position[1]))
+            self._recorded_distances.append(self.calculate_goal_distance())
+            
+            if self.current_rotation is not None:
+                self._recorded_rotations.append(list(self.current_rotation))
+            else:
+                self._recorded_rotations.append([0.0, 0.0, 0.0, 1.0])
+            
+            self._record_count += 1
+        
+        # Periodic save
+        if self._save_interval > 0 and now - self._last_save_time >= self._save_interval:
+            self._periodic_save()
+            self._last_save_time = now
+    
+    def _get_record_filename(self) -> str:
+        """Get the filename for recording (generate if not specified)."""
+        if self._record_file:
+            return self._record_file
+        else:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            return f"optitrack_recording_{timestamp}.npz"
+    
+    def _periodic_save(self) -> None:
+        """Save recorded data periodically (called from _record_data_point)."""
+        if self._record_count == 0:
+            return
+        
+        # Use a fixed filename for periodic saves (so we overwrite the same file)
+        if not hasattr(self, '_periodic_save_filename'):
+            self._periodic_save_filename = self._get_record_filename()
+        
+        filename = self._periodic_save_filename
+        
+        with self._lock:
+            rotations = np.array(self._recorded_rotations)
+            
+            np.savez(
+                filename,
+                timestamps=np.array(self._recorded_timestamps),
+                positions_x=np.array(self._recorded_positions_x),
+                positions_y=np.array(self._recorded_positions_y),
+                positions_z=np.array(self._recorded_positions_z),
+                goal_x=np.array(self._recorded_goal_x),
+                goal_y=np.array(self._recorded_goal_y),
+                distances=np.array(self._recorded_distances),
+                rotations=rotations,
+                rigid_body_id=self.rigid_body_id,
+                record_interval=self._record_interval,
+                total_runtime=time.time() - self._start_time,
+            )
+    
+    def save_recorded_data(self) -> Optional[str]:
+        """Save recorded data to file. Returns the filename if successful."""
+        if not self._record or self._record_count == 0:
+            return None
+        
+        # Use the same filename as periodic saves if available
+        if hasattr(self, '_periodic_save_filename'):
+            filename = self._periodic_save_filename
+        else:
+            filename = self._get_record_filename()
+        
+        with self._lock:
+            # Convert rotations to numpy array
+            rotations = np.array(self._recorded_rotations)
+            
+            np.savez(
+                filename,
+                timestamps=np.array(self._recorded_timestamps),
+                positions_x=np.array(self._recorded_positions_x),
+                positions_y=np.array(self._recorded_positions_y),
+                positions_z=np.array(self._recorded_positions_z),
+                goal_x=np.array(self._recorded_goal_x),
+                goal_y=np.array(self._recorded_goal_y),
+                distances=np.array(self._recorded_distances),
+                rotations=rotations,
+                rigid_body_id=self.rigid_body_id,
+                record_interval=self._record_interval,
+                total_runtime=time.time() - self._start_time,
+            )
+        
+        return filename
+    
+    def get_recording_stats(self) -> dict:
+        """Get recording statistics."""
+        return {
+            "enabled": self._record,
+            "count": self._record_count,
+            "interval": self._record_interval,
+            "file": self._record_file,
+        }
 
 
 # =============================================================================
@@ -535,6 +688,15 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--rate", type=float, default=FEEDBACK_RATE)
     parser.add_argument("--no-dashboard", action="store_true", help="Disable rich dashboard")
     
+    # Recording options
+    parser.add_argument("--record", action="store_true", help="Enable recording of tracking data")
+    parser.add_argument("--record-file", type=str, default=None, 
+                        help="Output file for recorded data (default: optitrack_recording_<timestamp>.npz)")
+    parser.add_argument("--record-interval", type=float, default=0.1,
+                        help="Recording interval in seconds (default: 0.1)")
+    parser.add_argument("--save-interval", type=float, default=10.0,
+                        help="Save data to file every N seconds (default: 10.0, set to 0 to disable)")
+    
     return parser.parse_args()
 
 
@@ -551,6 +713,10 @@ def main() -> None:
         command_port=args.command_port,
         goal_x=args.goal_x,
         goal_y=args.goal_y,
+        record=args.record,
+        record_file=args.record_file,
+        record_interval=args.record_interval,
+        save_interval=args.save_interval,
     )
     
     # Signal handler with forced exit
@@ -576,6 +742,8 @@ def main() -> None:
         print(f"OptiTrack Server: {args.optitrack_ip}")
         print(f"Rigid Body ID:    {args.rigid_body_id}")
         print(f"Goal Position:    ({args.goal_x}, {args.goal_y})")
+        if args.record:
+            print(f"Recording:        Enabled (rec: {args.record_interval}s, save: {args.save_interval}s)")
         print("=" * 60)
     
     try:
@@ -590,6 +758,9 @@ def main() -> None:
     finally:
         client.stop()
         
+        # Save recorded data if recording was enabled
+        saved_file = client.save_recorded_data()
+        
         # Print summary
         print("\n" + "=" * 60)
         print("Summary:")
@@ -599,6 +770,11 @@ def main() -> None:
         print(f"  Commands received: {client.recv_count}")
         if client.current_position is not None:
             print(f"  Final distance: {client.calculate_goal_distance():.3f} m")
+        
+        # Print recording info
+        if saved_file:
+            print(f"  Recording saved: {saved_file}")
+            print(f"  Recorded samples: {client._record_count}")
         print("=" * 60)
         
         # Force exit to kill any lingering NatNet threads

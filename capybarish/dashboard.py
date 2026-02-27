@@ -1680,6 +1680,9 @@ class RLDashboard:
         bearing_rad: float,
         distance: float = -1.0,
         history_filled: bool = True,
+        uncertainty_rad: Optional[float] = None,
+        pred_vel_xy: Optional[Tuple[float, float]] = None,
+        pred_yaw_rate: Optional[float] = None,
     ) -> None:
         """Update bearing estimation display (convenience wrapper for gauge).
         
@@ -1687,6 +1690,9 @@ class RLDashboard:
             bearing_rad: Bearing in radians (positive = left, negative = right)
             distance: Current distance to target (meters)
             history_filled: Whether enough history has been collected
+            uncertainty_rad: Predicted bearing std (radians)
+            pred_vel_xy: Predicted local velocity (vx, vy)
+            pred_yaw_rate: Predicted yaw rate (rad/s)
         """
         # Auto-create bearing gauge if not exists
         if "bearing" not in self._gauges:
@@ -1706,6 +1712,16 @@ class RLDashboard:
         extra = {}
         if distance > 0:
             extra['distance'] = f"{distance:.2f}m"
+        if uncertainty_rad is not None:
+            extra['σ'] = f"{np.degrees(uncertainty_rad):.1f}°"
+        if pred_vel_xy is not None:
+            try:
+                vx, vy = pred_vel_xy
+                extra['vxy'] = f"{vx:+.2f},{vy:+.2f} m/s"
+            except (TypeError, ValueError):
+                pass
+        if pred_yaw_rate is not None:
+            extra['yaw'] = f"{np.degrees(pred_yaw_rate):+.1f}°/s"
         
         self.update_gauge("bearing", bearing_deg, ready=history_filled, extra_info=extra)
     
@@ -2277,7 +2293,7 @@ class RLDashboard:
                 else:
                     name_text.stylize(self.theme['dim'])
                 
-                # Format values (show all for commands, truncate others)
+                # Format values (show full vectors; no truncation)
                 if is_command:
                     # Show command values with active indicator for one-hot
                     if self._onehot_mode and len(data) > 0:
@@ -2287,15 +2303,10 @@ class RLDashboard:
                         val_str = f"→{active_name} ["
                         val_str += " ".join(f"{v:.0f}" for v in data)
                         val_str += "]"
-                    elif len(data) <= 5:
-                        val_str = " ".join(f"{v:+.2f}" for v in data)
                     else:
-                        val_str = " ".join(f"{v:+.2f}" for v in data[:4]) + f".. [{len(data)}]"
+                        val_str = " ".join(f"{v:+.2f}" for v in data)
                 else:
-                    if len(data) <= 3:
-                        val_str = " ".join(f"{v:+.2f}" for v in data)
-                    else:
-                        val_str = " ".join(f"{v:+.2f}" for v in data[:2]) + f".. [{len(data)}]"
+                    val_str = " ".join(f"{v:+.2f}" for v in data)
                 
                 # Calculate delta from previous step
                 delta_text = Text()
