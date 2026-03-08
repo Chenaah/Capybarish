@@ -782,6 +782,7 @@ class Interface:
         vel_actions: Optional[np.ndarray] = None,
         kps: Optional[np.ndarray] = None,
         kds: Optional[np.ndarray] = None,
+        latent: Optional[np.ndarray] = None,
     ) -> None:
         """Send control actions to robot modules.
 
@@ -790,6 +791,8 @@ class Interface:
             vel_actions: Velocity commands for each module (optional)
             kps: Proportional gains for each module (optional)
             kds: Derivative gains for each module (optional)
+            latent: Optional latent vector (8-dim) from master policy to broadcast with commands.
+                    If None, all-zeros are sent (backward compatible legacy mode).
         """
         # Update motor commands from dashboard
         if self.enable_dashboard:
@@ -827,9 +830,11 @@ class Interface:
 
         # Send commands to each module
         self.curr_timestamp = time.time() - self.start_time
-        for target_pos, target_vel, module_id, kp, kd in zip(
+        # Prepare latent vector (zeros for legacy mode)
+        latent_vec = list(latent.flatten()[:8]) if latent is not None else [0.0] * 8
+        for action_idx, (target_pos, target_vel, module_id, kp, kd) in enumerate(zip(
             pos_actions, vel_actions, self.module_ids, kps_real, kds_real
-        ):
+        )):
             # Apply safety check if enabled
             if self.check_action_safety:
                 safe_pos = self._action_safety_check(target_pos, module_id)
@@ -854,6 +859,8 @@ class Interface:
                 calibration_cmd,
                 self.motor_commands[module_id]["restart"],
                 self.curr_timestamp,
+                action_idx,          # joint_id: index of this action
+                latent_vec,          # latent: master policy output (zeros if not hierarchical)
             ]
 
             # Log restart command
@@ -918,6 +925,7 @@ class Interface:
             # Create command using generated message type if available
             if USE_GENERATED_MESSAGES:
                 # Data format: [target_pos, target_vel, kp, kd, enable_filter, switch, calibrate, restart, timestamp]
+                # Optional extra fields: [joint_id, latent] (filled from module_id context if available)
                 command_data = MotorCommand(
                     target=data[0],
                     target_vel=data[1],
@@ -927,7 +935,9 @@ class Interface:
                     switch_=data[5],
                     calibrate=data[6],
                     restart=data[7],
-                    timestamp=data[8]
+                    timestamp=data[8],
+                    joint_id=int(data[9]) if len(data) > 9 else -1,
+                    latent=list(data[10]) if len(data) > 10 else [0.0] * 8,
                 )
             else:
                 # Fallback to old SentDataStruct

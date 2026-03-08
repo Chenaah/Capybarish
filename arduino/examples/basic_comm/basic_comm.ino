@@ -37,6 +37,8 @@ struct MotorCommand {
     int32_t calibrate;
     int32_t restart;
     float timestamp;
+    int32_t joint_id;    // Action index (0-based); -1 = legacy/broadcast
+    float latent[8];     // Latent vector from master policy; zeros for legacy
 };
 
 // Sensor data sent to server (SensorData)

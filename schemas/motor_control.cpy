@@ -23,6 +23,9 @@ message MotorCommand:
     int32 calibrate          # Trigger calibration (0 or 1)
     int32 restart            # Trigger restart (0 or 1)
     float32 timestamp        # Command timestamp (seconds)
+    # Hierarchical policy fields (master policy output)
+    int32 joint_id           # Index of the joint/action this command targets (0-based); -1 = broadcast/all
+    float32[8] latent        # Latent vector from master policy (8-dim); zeros for legacy usage
 
 # ============================================================================
 # Sensor Data Messages (Robot -> Server)
