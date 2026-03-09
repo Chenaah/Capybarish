@@ -23,7 +23,10 @@ message MotorCommand:
     int32 calibrate          # Trigger calibration (0 or 1)
     int32 restart            # Trigger restart (0 or 1)
     float32 timestamp        # Command timestamp (seconds)
-    # Hierarchical policy fields (master policy output)
+    int32 control_mode       # Control mode: 0=direct PD target from PC, 1=ESP32 local policy
+    float32 joint_offset     # Per-joint default offset (radians), sent explicitly by PC
+    int32 policy_hash        # Positive int32 FNV-1a hash of the deployed local policy weights
+    # Hierarchical policy fields (master policy metadata)
     int32 joint_id           # Index of the joint/action this command targets (0-based); -1 = broadcast/all
     float32[8] latent        # Latent vector from master policy (8-dim); zeros for legacy usage
 
@@ -99,5 +102,8 @@ message SensorData:
     MotorData motor          # Motor sensor data
     IMUData imu              # IMU sensor data
     ErrorData error          # Error/reset data
+    int32 policy_hash        # Positive int32 FNV-1a hash computed on ESP32 from loaded policy weights
+    int32 policy_status      # Bitmask: loaded/sanity/hash seen/hash match/runtime check
+    int32 policy_error       # Runtime policy error code (0=OK, nonzero=fault)
     float32 goal_distance    # Distance to goal (meters)
     UWBDistances uwb         # UWB distance measurements

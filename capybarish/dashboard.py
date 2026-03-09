@@ -1997,7 +1997,7 @@ class RLDashboard:
         table.add_column("Vel", justify="right", style=self.theme['secondary'], width=6)
         table.add_column("V", justify="right", style=self.theme['dim'], width=4)
         table.add_column("Mode", justify="center", width=6)  # Motor mode indicator
-        table.add_column("Error", justify="left", width=14)   # Motor + Driver errors (decoded)
+        table.add_column("Error", justify="left", width=18)   # Motor + Driver + policy errors
         table.add_column("Status", justify="center", width=8)
         
         devices = dict(self._devices)
@@ -2023,22 +2023,26 @@ class RLDashboard:
                 else:
                     mode_str = f"[{self.theme['error']}]○ {mode_name}[/]"
                 
-                # Decode and display motor_error + driver_error using error decoder
-                err_parts = []
-                motor_err_str = self._error_decoder.decode_motor_error(dev.motor_error)
-                driver_err_str = self._error_decoder.decode_driver_error(dev.driver_error)
-                if motor_err_str:
-                    err_parts.append(motor_err_str)
-                if driver_err_str:
-                    err_parts.append(driver_err_str)
-                if err_parts:
-                    err_str = f"[{self.theme['error']}]{' '.join(err_parts)}[/]"
+                # Prefer explicit env/device error text (e.g. policy validation),
+                # then fall back to decoded motor/driver errors.
+                if dev.error and dev.error not in ("None", "none", "", "OK", "ok"):
+                    err_str = f"[{self.theme['error']}]{str(dev.error)[:18]}[/]"
                 else:
-                    err_str = f"[{self.theme['accent']}]OK[/]"
+                    err_parts = []
+                    motor_err_str = self._error_decoder.decode_motor_error(dev.motor_error)
+                    driver_err_str = self._error_decoder.decode_driver_error(dev.driver_error)
+                    if motor_err_str:
+                        err_parts.append(motor_err_str)
+                    if driver_err_str:
+                        err_parts.append(driver_err_str)
+                    if err_parts:
+                        err_str = f"[{self.theme['error']}]{' '.join(err_parts)[:18]}[/]"
+                    else:
+                        err_str = f"[{self.theme['accent']}]OK[/]"
                 
                 # Status with visual indicator (based on connection status)
-                if dev.error:  # Reset reason errors
-                    status = f"[{self.theme['error']}]⚠ RST[/]"
+                if dev.error:
+                    status = f"[{self.theme['error']}]⚠ ERR[/]"
                 elif is_active:
                     switch = dev.custom_data.get("switch", False)
                     if switch:
