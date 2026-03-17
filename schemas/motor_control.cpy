@@ -23,12 +23,12 @@ message MotorCommand:
     int32 calibrate          # Trigger calibration (0 or 1)
     int32 restart            # Trigger restart (0 or 1)
     float32 timestamp        # Command timestamp (seconds)
-    int32 control_mode       # Control mode: 0=direct PD target from PC, 1=ESP32 local policy
+    int32 control_mode       # Control mode: 0=direct PD target from PC, 1=ESP32 onboard model
     float32 joint_offset     # Per-joint default offset (radians), sent explicitly by PC
-    int32 policy_hash        # Positive int32 FNV-1a hash of the deployed local policy weights
-    # Hierarchical policy fields (master policy metadata)
+    int32 policy_hash        # Positive int32 FNV-1a hash of the deployed onboard model weights
+    # Optional per-command metadata
     int32 joint_id           # Index of the joint/action this command targets (0-based); -1 = broadcast/all
-    float32[8] latent        # Latent vector from master policy (8-dim); zeros for legacy usage
+    float32[8] command_context  # Auxiliary command context (8-dim); zeros when unused
 
 # ============================================================================
 # Sensor Data Messages (Robot -> Server)
@@ -91,6 +91,20 @@ message UWBDistances:
     float32 d2               # Distance to anchor 2 (meters)
     float32 d3               # Distance to anchor 3 (meters)
 
+# Debug snapshot from the ESP32 onboard-model loop.
+# This is published in feedback so the PC can inspect the exact onboard-model
+# input/output used on the module.
+message PolicyDebugData:
+    int32 valid              # 1 when onboard-model debug data is populated
+    int32 seq                # Monotonic sequence number for model ticks
+    float32 nn_action        # Raw onboard-model action in [-0.8, 0.8]
+    float32 motor_target     # Final motor target after adding joint_offset
+    float32 joint_offset     # Joint offset applied on the ESP32
+    float32 dof_pos          # Filtered joint position used by the onboard model
+    float32 dof_vel          # Filtered joint velocity used by the onboard model
+    float32[8] command_context  # Latest command context used by the onboard model
+    float32[40] local_obs    # Full onboard-model observation history (current deploy config)
+
 # Complete sensor data from robot module
 message SensorData:
     int32 module_id          # Unique module identifier
@@ -107,3 +121,4 @@ message SensorData:
     int32 policy_error       # Runtime policy error code (0=OK, nonzero=fault)
     float32 goal_distance    # Distance to goal (meters)
     UWBDistances uwb         # UWB distance measurements
+    PolicyDebugData policy_debug  # Optional onboard-model debug snapshot

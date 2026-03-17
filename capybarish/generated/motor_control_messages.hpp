@@ -46,11 +46,11 @@ struct MotorCommand {
     int32_t calibrate = 0;  ///< Trigger calibration (0 or 1)
     int32_t restart = 0;  ///< Trigger restart (0 or 1)
     float timestamp = 0.0f;  ///< Command timestamp (seconds)
-    int32_t control_mode = 0;  ///< Control mode: 0=direct PD target from PC, 1=ESP32 local policy
+    int32_t control_mode = 0;  ///< Control mode: 0=direct PD target from PC, 1=ESP32 onboard model
     float joint_offset = 0.0f;  ///< Per-joint default offset (radians), sent explicitly by PC
-    int32_t policy_hash = 0;  ///< Positive int32 FNV-1a hash of the deployed local policy weights
+    int32_t policy_hash = 0;  ///< Positive int32 FNV-1a hash of the deployed onboard model weights
     int32_t joint_id = 0;  ///< Index of the joint/action this command targets (0-based); -1 = broadcast/all
-    float latent[8];  ///< Latent vector from master policy (8-dim); zeros for legacy usage
+    float command_context[8];  ///< Auxiliary command context (8-dim); zeros when unused
 
     static constexpr size_t SIZE = 84;
 

@@ -71,15 +71,15 @@ class MotorCommand:
     calibrate: int = 0  # Trigger calibration (0 or 1)
     restart: int = 0  # Trigger restart (0 or 1)
     timestamp: float = 0.0  # Command timestamp (seconds)
-    control_mode: int = 0  # Control mode: 0=direct PD target from PC, 1=ESP32 local policy
+    control_mode: int = 0  # Control mode: 0=direct PD target from PC, 1=ESP32 onboard model
     joint_offset: float = 0.0  # Per-joint default offset (radians), sent explicitly by PC
-    policy_hash: int = 0  # Positive int32 FNV-1a hash of the deployed local policy weights
+    policy_hash: int = 0  # Positive int32 FNV-1a hash of the deployed onboard model weights
     joint_id: int = 0  # Index of the joint/action this command targets (0-based); -1 = broadcast/all
-    latent: List[float] = field(default_factory=lambda: [0.0] * 8)  # Latent vector from master policy (8-dim); zeros for legacy usage
+    command_context: List[float] = field(default_factory=lambda: [0.0] * 8)  # Auxiliary command context (8-dim); zeros when unused
 
     def serialize(self) -> bytes:
         """Serialize message to bytes."""
-        return struct.pack(self._FORMAT, self.target, self.target_vel, self.kp, self.kd, self.enable_filter, self.switch_, self.calibrate, self.restart, self.timestamp, self.control_mode, self.joint_offset, self.policy_hash, self.joint_id, *self.latent)
+        return struct.pack(self._FORMAT, self.target, self.target_vel, self.kp, self.kd, self.enable_filter, self.switch_, self.calibrate, self.restart, self.timestamp, self.control_mode, self.joint_offset, self.policy_hash, self.joint_id, *self.command_context)
 
     @classmethod
     def deserialize(cls, data: bytes) -> 'MotorCommand':
@@ -101,7 +101,7 @@ class MotorCommand:
         obj.joint_offset = values[10]
         obj.policy_hash = values[11]
         obj.joint_id = values[12]
-        obj.latent = list(values[13:21])
+        obj.command_context = list(values[13:21])
         return obj
 
     @classmethod

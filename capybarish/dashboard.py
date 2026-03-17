@@ -1813,6 +1813,7 @@ class RLDashboard:
         layout.split_column(
             Layout(name="header", size=header_size),
             Layout(name="main", ratio=1),
+            Layout(name="log", size=max(6, self._max_log_lines + (2 if self._expected_modules else 0) + 2)),
             Layout(name="footer", size=3),
         )
         
@@ -1824,19 +1825,17 @@ class RLDashboard:
         
         # Left side layout depends on whether models are loaded
         if self._num_models > 1:
-            # Multi-model mode: Motors + Models + Commands + Log
+            # Multi-model mode: Motors + Models + Commands
             layout["left"].split_column(
                 Layout(name="motors", ratio=2),
                 Layout(name="models", ratio=1),
                 Layout(name="commands", ratio=1),
-                Layout(name="log", ratio=1),
             )
         else:
-            # Single model mode: Motors + Commands + Log
+            # Single model mode: Motors + Commands
             layout["left"].split_column(
                 Layout(name="motors", ratio=2),
                 Layout(name="commands", ratio=1),
-                Layout(name="log", ratio=1),
             )
         
         # Right side: Observations + Actions/System (+ Gauges if any)
@@ -2610,9 +2609,7 @@ class RLDashboard:
                 
                 content.append(f"{time_str:>4} ", style=self.theme['dim'])
                 content.append(f"{prefix} ", style=level_style)
-                # Truncate long messages
-                msg = message[:45] + "..." if len(message) > 48 else message
-                content.append(f"{msg}\n", style=self.theme['secondary'])
+                content.append(f"{message}\n", style=self.theme['secondary'])
         elif not self._expected_modules:
             content.append("No messages yet...", style=self.theme['dim'])
         
